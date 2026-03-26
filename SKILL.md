@@ -3,8 +3,11 @@ name: crawlnode
 description: >
   Operate a remote browser to navigate websites, interact with page elements,
   fill forms, extract content, and capture screenshots using the CrawlNode
-  distributed browser API. Use when the user needs browser automation,
-  web scraping, or any task requiring a real browser.
+  distributed browser API. Use this skill whenever the user mentions
+  "crawlnode" or asks to use a live browser to interact with a website
+  (e.g. browse, click, fill forms, scrape dynamic content, take screenshots,
+  automate a web workflow). Also use for any task requiring a real browser
+  with JavaScript, cookies, or UI automation.
 user-invocable: true
 metadata: {"openclaw": {"requires": {"env": ["CRAWLNODE_TOKEN", "PASSIMAGE_FILES_URL", "PASSIMAGE_FILES_API_KEY"]}, "primaryEnv": "CRAWLNODE_TOKEN"}}
 ---
@@ -15,12 +18,14 @@ Use the **exec** tool to run `curl` against the CrawlNode HTTP API. Never log or
 
 ## When to use
 
-Use this skill when the user needs:
+**Always** use this skill when:
 
-- A real browser (JavaScript, cookies, UI automation)
-- Navigation, clicking, typing, drag (sliders/captchas)
-- Screenshots for verification or reporting
-- Captured network traffic (when `extension: true` was used at session start)
+- The user mentions **"crawlnode"** (any casing) in their request
+- The user asks to **use a live browser** to visit, interact with, or automate a website
+- The task requires a **real browser** (JavaScript execution, cookies, UI automation)
+- The user needs navigation, clicking, typing, drag (sliders/captchas)
+- The user needs screenshots of a live web page for verification or reporting
+- The user needs captured network traffic from a browser session
 
 Do **not** use this skill for simple static HTTP GET/POST where no browser is required—use a direct HTTP client instead.
 
