@@ -6,12 +6,12 @@ description: >
   distributed browser API. Use when the user needs browser automation,
   web scraping, or any task requiring a real browser.
 user-invocable: true
-metadata: {"openclaw": {"requires": {"env": ["CRAWLNODE_TOKEN"]}, "primaryEnv": "CRAWLNODE_TOKEN"}}
+metadata: {"openclaw": {"requires": {"env": ["CRAWLNODE_TOKEN", "PASSIMAGE_FILES_URL", "PASSIMAGE_FILES_API_KEY"]}, "primaryEnv": "CRAWLNODE_TOKEN"}}
 ---
 
 # CrawlNode remote browser
 
-Use the **exec** tool to run `curl` against the CrawlNode HTTP API. Never log or echo the value of `CRAWLNODE_TOKEN`. Use `$CRAWLNODE_TOKEN` in shell only (the environment is injected per OpenClaw agent run when configured).
+Use the **exec** tool to run `curl` against the CrawlNode HTTP API. Never log or echo the values of `CRAWLNODE_TOKEN` or `PASSIMAGE_FILES_API_KEY`. Use `$CRAWLNODE_TOKEN` and `$PASSIMAGE_FILES_API_KEY` in shell only (the environment is injected per OpenClaw agent run when configured).
 
 ## When to use
 
@@ -32,6 +32,7 @@ Do **not** use this skill for simple static HTTP GET/POST where no browser is re
 | Auth | Header `Token: <value from env CRAWLNODE_TOKEN>` on every request |
 | Session | After `/api/start`, send header `X-Session-Id: <session_id>` on all other endpoints |
 | JSON POSTs | `Content-Type: application/json` |
+| Screenshot uploads | `PASSIMAGE_FILES_URL` (base URL for uploads, no trailing slash) and `PASSIMAGE_FILES_API_KEY` (sent as `X-API-Key`) |
 
 Store `session_id` from the JSON body (and/or `X-Session-Id` response header) and reuse it for the whole workflow.
 
@@ -159,16 +160,61 @@ curl -sS -X POST "http://api1.crawlnode.com/api/drag" \
 
 **POST /api/screenshot** — response body is **PNG binary** (`image/png`). Save to a file; do not paste raw bytes into chat.
 
+> **Mandatory rule — screenshot → upload → share.**
+> Every time you take a screenshot you **must** upload it and share the
+> public URL with the user. There are no exceptions. See the combined
+> example below.
+
+#### When to screenshot
+
+Take a screenshot **immediately** after any of these events once the page has settled:
+
+- **POST /api/go** (navigation)
+- **POST /api/refresh**
+- **POST /api/click** or **POST /api/input** that triggers a visible page change (new content, modal, navigation)
+- **POST /api/solve_captcha** or **POST /api/drag** that alters the view
+- Session start (first page load)
+- Before reporting an error to the user (if the session is still alive)
+
+When in doubt, screenshot. The cost of an extra screenshot is low; the cost of the user not seeing the current page is high.
+
+#### Combined example (capture → upload → share)
+
 ```bash
+# 1. Capture
 curl -sS -X POST "http://api1.crawlnode.com/api/screenshot" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
   -d '{}' \
   --output /tmp/crawlnode-screenshot.png
+
+# 2. Upload — response is the public URL as plain text, e.g.:
+#    https://s.passimage.in/f/8d5ee2e3d5c3.png
+SCREENSHOT_URL=$(curl -s -X POST "$PASSIMAGE_FILES_URL/upload" \
+  -H "X-API-Key: $PASSIMAGE_FILES_API_KEY" \
+  -H "Content-Type: image/png" \
+  -H "X-Filename: crawlnode-screenshot.png" \
+  --data-binary "@/tmp/crawlnode-screenshot.png")
+
+# 3. Share — include $SCREENSHOT_URL in your reply (see format below)
+echo "$SCREENSHOT_URL"
 ```
 
-Take screenshots after important actions when the user needs verification; avoid excessive screenshots (large payloads).
+Always include the returned URL in your **very next reply** to the user. If the upload fails, retry once; if it still fails, tell the user the upload failed and continue.
+
+#### How to present screenshots to the user
+
+After every action, report what you did and append the screenshot URL in parentheses on the same line. Examples:
+
+```
+- Navigated to: https://www.vinaudit.com (https://s.passimage.in/f/8d5ee2e3d5c3.png)
+- Clicked the button "[VIN SEARCH]" (https://s.passimage.in/f/8d5ee2e3d5c4.png)
+```
+
+Format: `- <action description> (<screenshot URL>)`
+
+Each action that changes the page gets its own line with its own screenshot. This gives the user a visual step-by-step log of everything that happened.
 
 ### Network traffic
 
@@ -194,15 +240,16 @@ Decode `request` and `response` fields from base64 when you need plain text (e.g
 
 ## Interaction workflow
 
-For each page state:
+Repeat for each page state:
 
-1. **POST /api/view** to refresh the element tree.
-2. Choose **`automation_id` over `element_id`** when both exist and the automation id is stable.
-3. **POST /api/click** or **POST /api/input** (or **POST /api/drag**) as required.
-4. **POST /api/screenshot** to a temp file to verify layout or report back.
-5. Allow a short pause between steps when the page is loading or animating.
+1. **Screenshot → upload → share** the current page (see **Screen capture**). This is the first thing you do after any navigation or visible page change so the user always has an up-to-date view.
+2. **POST /api/view** to refresh the element tree.
+3. Choose **`automation_id` over `element_id`** when both exist and the automation id is stable.
+4. **POST /api/click**, **POST /api/input**, or **POST /api/drag** as required.
+5. If the action caused a visible change, go back to step 1.
+6. Allow a short pause between steps when the page is loading or animating.
 
-After **POST /api/go**, wait for navigation to settle before **/api/view** if the page is slow or dynamic.
+After **POST /api/go**, wait for navigation to settle, then start at step 1 (screenshot → upload → share) before doing anything else.
 
 ## Network traffic extraction
 
@@ -221,7 +268,7 @@ After **POST /api/go**, wait for navigation to settle before **/api/view** if th
 
 JSON errors often look like: `{"detail":"..."}`. Plain-text errors are possible (e.g. invalid token).
 
-Before reporting a failure to the user, capture **POST /api/screenshot** to a file when the session may still be alive, so the user can see what the remote browser showed.
+Before reporting a failure to the user, run the full **screenshot → upload → share** sequence (see **Screen capture**) when the session may still be alive, so the user can see what the remote browser showed.
 
 ## Important rules
 
@@ -229,6 +276,6 @@ Before reporting a failure to the user, capture **POST /api/screenshot** to a fi
 - Prefer **automation_id** over **element_id** when practical.
 - Always **/api/destroy** when done.
 - Enable **extension: true** only when network capture is needed.
-- Save screenshots with **curl `--output`** (or equivalent); never inline binary PNG in messages.
+- **Every screenshot must be uploaded and shared.** Save with `--output`, upload via Passimage, and include the public URL in your reply. No exceptions — never take a screenshot without uploading and sharing it.
 - Do not embed user-controlled strings directly into shell commands without proper quoting/escaping—prefer writing JSON bodies via a here-doc or a safely quoted file to avoid injection.
 - For full schemas and examples, see `docs/CRAWLNODE-API-DOCUMENTATION.md` in this repository.
