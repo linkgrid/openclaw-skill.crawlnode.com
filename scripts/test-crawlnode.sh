@@ -29,17 +29,14 @@ if [ -z "${CRAWLNODE_TOKEN:-}" ]; then
   export CRAWLNODE_TOKEN
 fi
 
-if [ -z "${PASSIMAGE_FILES_URL:-}" ]; then
-  read -rp "PASSIMAGE_FILES_URL (e.g. https://s.passimage.in): " PASSIMAGE_FILES_URL
-  export PASSIMAGE_FILES_URL
-fi
+PASSIMAGE_FILES_URL="${PASSIMAGE_FILES_URL:-https://s.passimage.in}"
 
 if [ -z "${PASSIMAGE_FILES_API_KEY:-}" ]; then
   read -rp "PASSIMAGE_FILES_API_KEY: " PASSIMAGE_FILES_API_KEY
   export PASSIMAGE_FILES_API_KEY
 fi
 
-echo "Got token: CRAWLNODE_TOKEN"
+echo "Got tokens: CRAWLNODE_TOKEN, PASSIMAGE_FILES_API_KEY"
 
 # --- 1. Start session ---
 echo "Calling $API/api/start ..."
