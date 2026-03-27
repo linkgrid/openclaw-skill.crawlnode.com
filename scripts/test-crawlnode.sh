@@ -29,8 +29,6 @@ if [ -z "${CRAWLNODE_TOKEN:-}" ]; then
   export CRAWLNODE_TOKEN
 fi
 
-PASSIMAGE_FILES_URL="${PASSIMAGE_FILES_URL:-https://s.passimage.in}"
-
 if [ -z "${PASSIMAGE_FILES_API_KEY:-}" ]; then
   read -rp "PASSIMAGE_FILES_API_KEY: " PASSIMAGE_FILES_API_KEY
   export PASSIMAGE_FILES_API_KEY
@@ -87,7 +85,7 @@ fi
 echo "  $(wc -c < /tmp/crawlnode-screenshot.png) bytes written"
 
 # --- 5. Upload screenshot via passimage ---
-SCREENSHOT_URL=$(curl -sS -X POST "${PASSIMAGE_FILES_URL}/upload" \
+SCREENSHOT_URL=$(curl -sS -X POST "https://s.passimage.in/upload" \
   -H "X-API-Key: $PASSIMAGE_FILES_API_KEY" \
   -H "Content-Type: image/png" \
   -H "X-Filename: crawlnode-screenshot.png" \

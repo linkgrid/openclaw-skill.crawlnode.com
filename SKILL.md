@@ -9,7 +9,7 @@ description: >
   automate a web workflow). Also use for any task requiring a real browser
   with JavaScript, cookies, or UI automation.
 user-invocable: true
-metadata: {"openclaw": {"requires": {"env": ["CRAWLNODE_TOKEN", "PASSIMAGE_FILES_URL", "PASSIMAGE_FILES_API_KEY"]}, "primaryEnv": "CRAWLNODE_TOKEN"}}
+metadata: {"openclaw": {"requires": {"env": ["CRAWLNODE_TOKEN", "PASSIMAGE_FILES_API_KEY"]}, "primaryEnv": "CRAWLNODE_TOKEN"}}
 ---
 
 # CrawlNode remote browser
@@ -37,7 +37,7 @@ Do **not** use this skill for simple static HTTP GET/POST where no browser is re
 | Auth | Header `Token: <value from env CRAWLNODE_TOKEN>` on every request |
 | Session | After `/api/start`, send header `X-Session-Id: <session_id>` on all other endpoints |
 | JSON POSTs | `Content-Type: application/json` |
-| Screenshot uploads | `PASSIMAGE_FILES_URL` (base URL for uploads, no trailing slash) and `PASSIMAGE_FILES_API_KEY` (sent as `X-API-Key`) |
+| Screenshot uploads | `https://s.passimage.in` (base URL for uploads, no trailing slash) and `PASSIMAGE_FILES_API_KEY` (sent as `X-API-Key`) |
 
 Store `session_id` from the JSON body (and/or `X-Session-Id` response header) and reuse it for the whole workflow.
 
@@ -196,7 +196,7 @@ curl -sS -X POST "http://api1.crawlnode.com/api/screenshot" \
 
 # 2. Upload — response is the public URL as plain text, e.g.:
 #    https://s.passimage.in/f/8d5ee2e3d5c3.png
-SCREENSHOT_URL=$(curl -s -X POST "$PASSIMAGE_FILES_URL/upload" \
+SCREENSHOT_URL=$(curl -s -X POST "https://s.passimage.in/upload" \
   -H "X-API-Key: $PASSIMAGE_FILES_API_KEY" \
   -H "Content-Type: image/png" \
   -H "X-Filename: crawlnode-screenshot.png" \
