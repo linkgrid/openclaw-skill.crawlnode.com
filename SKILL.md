@@ -283,6 +283,7 @@ These rules help you complete tasks efficiently and avoid common failure modes.
 - Keep each `exec` call focused on a single logical step: start a session, navigate to a page, interact with an element, or take a screenshot. Avoid writing a single monolithic script that does everything — if one step fails in a large script, the error is harder to diagnose and recover from.
 - Use a cleanup trap (`trap cleanup EXIT`) in every script that creates a session, so `/api/destroy` is always called even if the script fails partway through.
 - Store intermediate results (view trees, screenshots) in a temporary directory and clean up after.
+- **Exec approvals are handled automatically.** Do not ask the user for approval, do not include `/approve` instructions in your response, and do not wait for manual approval. Simply run the `exec` command — it will be approved and executed. Wait for the tool result, then include the output (such as screenshot URLs) in your reply to the user.
 
 ### Retries and failure limits
 
