@@ -256,6 +256,46 @@ Repeat for each page state:
 
 After **POST /api/go**, wait for navigation to settle, then start at step 1 (screenshot → upload → share) before doing anything else.
 
+## Execution strategy
+
+These rules help you complete tasks efficiently and avoid common failure modes.
+
+### Navigation
+
+- If the user provides a URL, navigate directly to it with `/api/go`. Do not detour through a search engine first.
+- If the task requires finding something and no URL is given, use a search engine through CrawlNode. After the results page loads, inspect the `/api/view` tree for result links. If clicking a result element fails, extract the destination URL from the element's `name` or `path` and navigate to it directly with `/api/go`.
+- After every `/api/go`, take a screenshot and verify the page loaded as expected. If you see a 404 page, an error, a redirect to an unexpected page, or a blank screen, try the site's root URL (e.g. `https://example.com/`) before attempting any interaction.
+
+### Element identification
+
+- Always call `/api/view` before interacting with a page. Never reuse element identifiers from a previous page state.
+- Search the view tree systematically: look for `control_type` values like `EditControl` (text fields), `ButtonControl` (buttons), and `HyperlinkControl` (links). Match by `name`, `automation_id`, or position.
+- When `automation_id` and `element_id` are both available, prefer `automation_id` — it is more stable across page reloads.
+- If the view tree does not clearly expose the target element, try these fallbacks in order: (a) look for coordinate-based `element_id` values near the expected screen region, (b) use `/api/network` to discover form endpoints and submit data directly, (c) resize the window with `/api/resize` and re-fetch `/api/view` — some elements only appear at certain viewport sizes.
+
+### Session validation
+
+- After `/api/start`, immediately verify the response contains a non-empty `session_id`. If the field is missing or empty, retry the call once. If it still fails, report the raw API response to the user and stop.
+- If any API call returns a 500 or 520 error mid-workflow, take a screenshot (if the session is still alive), destroy the session, start a fresh one, and retry the failed step once before reporting failure.
+
+### Script structure
+
+- Keep each `exec` call focused on a single logical step: start a session, navigate to a page, interact with an element, or take a screenshot. Avoid writing a single monolithic script that does everything — if one step fails in a large script, the error is harder to diagnose and recover from.
+- Use a cleanup trap (`trap cleanup EXIT`) in every script that creates a session, so `/api/destroy` is always called even if the script fails partway through.
+- Store intermediate results (view trees, screenshots) in a temporary directory and clean up after.
+
+### Retries and failure limits
+
+- Do not retry the same failing approach more than twice. If an action fails twice with the same method, switch to a different strategy (e.g. different element identifier, different navigation path, or different viewport size).
+- After three different strategies have failed for the same step, stop. Report what you attempted, include screenshots of each failed state, and let the user decide how to proceed.
+- Never loop indefinitely. If you are unsure whether an action succeeded, take a screenshot and verify visually before continuing.
+
+### Efficiency
+
+- Resize the browser window to a standard desktop size (e.g. `1440×1200`) early in the session with `/api/resize`. This ensures consistent element layout and avoids mobile or responsive views that may hide elements.
+- Allow 3–5 seconds after `/api/go` or any action that triggers page navigation before taking a screenshot or calling `/api/view`. Pages with JavaScript may need time to render.
+- When the task involves multiple pages, complete all actions on one page before navigating to the next. Do not jump back and forth between pages unnecessarily.
+
 ## Network traffic extraction
 
 1. Start session with `"extension": true` **only** if network capture is required.
