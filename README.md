@@ -1,118 +1,95 @@
-# crawlnode-skill
+# openclaw-skills
 
-An [OpenClaw](https://openclaw.org) Skill that enables OpenClaw to operate a remote browser through the [CrawlNode](https://crawlnode.com) API.
+Central repository for all [OpenClaw](https://openclaw.org) agent skills. Each folder contains a self-contained skill that OpenClaw can load and use.
 
-## Overview
+## Architecture
 
-crawlnode-skill gives OpenClaw full browser automation capabilities by interfacing with CrawlNode's distributed browser infrastructure. When a user request requires browsing the web, filling out forms, extracting page content, or any other browser-based interaction, this skill handles the entire lifecycle of a remote browser session.
-
-## How It Works
-
-To fulfill a user request that requires a browser, crawlnode-skill follows this workflow:
-
-1. **Create a session** -- Starts a new remote browser instance via `/api/start`
-2. **Navigate** -- Directs the browser to the appropriate pages via `/api/go`
-3. **Interact** -- Performs the necessary actions on the page:
-   - Inspect the page element tree (`/api/view`)
-   - Click elements (`/api/click`)
-   - Type into fields (`/api/input`)
-   - Download network responses (`/api/download`)
-   - Drag elements such as sliders (`/api/drag`)
-4. **Extract content** -- Retrieves page text and data via `/api/download`
-5. **Capture screenshots** -- Takes a screenshot after each action via `/api/screenshot` to verify results and provide visual feedback
-6. **Destroy the session** -- Tears down the remote browser via `/api/destroy` to free resources
-
-## Configuration
-
-### Environment Variable
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `CRAWLNODE_TOKEN` | Yes | API token for authenticating with the CrawlNode API |
-
-The skill reads `CRAWLNODE_TOKEN` from the environment and passes it as the `Token` header on every request to the CrawlNode API.
-
-### API Endpoint
-
-All requests are sent to:
+OpenClaw uses a **classifier + sub-agent** pattern:
 
 ```
-http://api1.crawlnode.com
+                         User Request
+                              │
+                              ▼
+                    ┌───────────────────┐
+                    │   Main Agent      │
+                    │   (Classifier)    │
+                    │                   │
+                    │ Reads SKILLS.json │
+                    │ to decide which   │
+                    │ sub-agent(s) to   │
+                    │ activate          │
+                    └──────┬────────────┘
+                           │
+              ┌────────────┼────────────┐
+              ▼            ▼            ▼
+     ┌──────────────┐ ┌──────────┐ ┌──────────┐
+     │  crawlnode   │ │ passim…  │ │ (future) │
+     │              │◄┤►         │ │          │
+     │ Browse sites │ │ Upload & │ │ Calendar │
+     │ Fill forms   │ │ share    │ │ Slack    │
+     │ Screenshots  │ │ files    │ │ etc.     │
+     └──────────────┘ └──────────┘ └──────────┘
+           ▲                ▲
+           └────────────────┘
+           Skills collaborate
+           with each other
 ```
 
-## API Capabilities
+1. **Main Agent (Classifier)** — receives every user request, reads `SKILLS.json` to understand what skills are available, then routes the task to the right sub-agent.
+2. **Sub-Agents (Skills)** — each skill is a specialist. It handles one type of task really well.
+3. **Collaboration** — skills can call on each other mid-task. For example, CrawlNode takes a screenshot and hands it to PassImageIn to upload and get a public URL.
 
-| Endpoint | Purpose |
-|----------|---------|
-| `POST /api/start` | Create a new browser session |
-| `POST /api/destroy` | Destroy a session and free resources |
-| `POST /api/go` | Navigate to a URL |
-| `POST /api/view` | Get the page's UI element tree |
-| `POST /api/click` | Click an element by ID |
-| `POST /api/input` | Type text or send keystrokes |
-| `POST /api/drag` | Drag between coordinates (sliders, captchas) |
-| `POST /api/screenshot` | Capture a PNG screenshot |
-| `POST /api/network` | List captured network requests |
-| `POST /api/download` | Download raw HTTP request/response data |
-| `POST /api/solve_captcha` | Auto-solve slider captchas |
-| `POST /api/refresh` | Refresh the current page |
-| `POST /api/maximize` | Maximize the browser window |
-| `POST /api/resize` | Resize and reposition the window |
-| `POST /api/clear` | Clear cookies and cache |
+## Skill Registry
 
-For full request/response schemas and usage examples, see the [CrawlNode API Documentation](docs/CRAWLNODE-API-DOCUMENTATION.md).
+`SKILLS.json` at the root of this repo is the central index. It lists every skill, what it can do, what environment variables it needs, and which other skills it can collaborate with. The classifier reads this file to make routing decisions.
 
-## Session Lifecycle
+## Skills
+
+| Skill | Folder | What it does |
+|-------|--------|--------------|
+| **CrawlNode** | `crawlnode/` | Remote browser automation — browse websites, interact with pages, capture screenshots |
+| **PassImageIn** | `passimagein/` | Upload files to s.passimage.in and return public URLs for sharing |
+
+## Folder Structure
 
 ```
-  CRAWLNODE_TOKEN
-        │
-        ▼
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│  /api/start  │────►│   /api/go    │────►│  /api/view   │
-│  Create      │     │  Navigate    │     │  Inspect     │
-└──────────────┘     └──────────────┘     └──────┬───────┘
-                                                 │
-                              ┌───────────────────┤
-                              ▼                   ▼
-                     ┌──────────────┐     ┌──────────────┐
-                     │ /api/click   │     │ /api/input   │
-                     │ /api/drag    │     │ /api/download│
-                     └──────┬───────┘     └──────┬───────┘
-                            │                    │
-                            └────────┬───────────┘
-                                     ▼
-                            ┌──────────────────┐
-                            │ /api/screenshot  │  (after each action)
-                            └────────┬─────────┘
-                                     │
-                                     ▼
-                            ┌──────────────────┐
-                            │  /api/destroy    │
-                            │  Clean up        │
-                            └──────────────────┘
+openclaw-skills/
+  SKILLS.json                         ← skill registry (classifier reads this)
+  README.md                           ← this file
+  crawlnode/
+    SKILL.md                          ← skill definition (loaded by OpenClaw)
+    docs/CRAWLNODE-API-DOCUMENTATION.md
+    scripts/test-crawlnode.sh
+  passimagein/
+    SKILL.md                          ← skill definition (loaded by OpenClaw)
+  (future-skill)/
+    SKILL.md
 ```
 
-## Installation
+Each skill folder must contain at minimum a `SKILL.md` file with:
+- YAML front-matter (`name`, `description`, and optionally `version`, `metadata`)
+- Instructions for how the agent should use the skill
 
-1. Define the `CRAWLNODE_TOKEN` environment variable in your OpenClaw instance
-2. Clone the repo:
-   ```bash
-   git clone https://github.com/linkgrid/openclaw-skill.crawlnode.com.git
-   ```
+## Adding a New Skill
+
+1. Create a new folder: `my-new-skill/`
+2. Add a `SKILL.md` with YAML front-matter and usage instructions
+3. Register it in `SKILLS.json` — add an entry with name, path, description, capabilities, required env vars, and which skills it can collaborate with
+4. Push to GitHub
+5. Run the refresh script on Claw1 to pull the update
 
 ## Deployment
 
-This skill is deployed as a GitHub repo at:
-
-https://github.com/linkgrid/openclaw-skill.crawlnode.com.git
-
-Deploying to production is simply pushing to GitHub:
+This repo is the single source of truth for all OpenClaw skills. On the Claw1 server:
 
 ```bash
-git push origin main
+~/scripts/refresh-openclaw.sh
 ```
 
-## Documentation
+This script pulls all skills from this repo into `/home/autoscale/.openclaw/skills/` and restarts the gateway.
 
-- [CrawlNode API Documentation](docs/CRAWLNODE-API-DOCUMENTATION.md) -- Complete API reference with request/response schemas, error handling, and code examples
+## Related Repos
+
+| Repo | Purpose |
+|------|---------|
+| [asa-cf-worker.autoscale.team](https://github.com/linkgrid/asa-cf-worker.autoscale.team) | ASA — Cloudflare Worker that connects Slack to OpenClaw |

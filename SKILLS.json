@@ -1,0 +1,34 @@
+{
+  "version": "1.0.0",
+  "description": "OpenClaw skill registry — lists every available sub-agent skill so the classifier and skills themselves know what is available for collaboration.",
+  "skills": [
+    {
+      "name": "crawlnode",
+      "path": "crawlnode/SKILL.md",
+      "description": "Remote browser automation — navigate websites, click elements, fill forms, capture screenshots, extract content via the CrawlNode API.",
+      "capabilities": [
+        "browse-website",
+        "click-element",
+        "fill-form",
+        "take-screenshot",
+        "extract-page-content",
+        "capture-network-traffic",
+        "solve-captcha"
+      ],
+      "requires_env": ["CRAWLNODE_TOKEN", "PASSIMAGE_FILES_API_KEY"],
+      "collaborates_with": ["passimagein"]
+    },
+    {
+      "name": "passimagein",
+      "path": "passimagein/SKILL.md",
+      "description": "File upload and public URL sharing — upload screenshots, images, documents, and any file to s.passimage.in and get back a public URL.",
+      "capabilities": [
+        "upload-file",
+        "share-screenshot",
+        "generate-public-url"
+      ],
+      "requires_env": ["PASSIMAGE_FILES_API_KEY"],
+      "collaborates_with": ["crawlnode"]
+    }
+  ]
+}
