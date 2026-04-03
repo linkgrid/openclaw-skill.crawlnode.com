@@ -16,6 +16,14 @@ metadata: {"openclaw": {"requires": {"env": ["CRAWLNODE_TOKEN", "PASSIMAGE_FILES
 
 Use the **exec** tool to run `curl` against the CrawlNode HTTP API. Never log or echo the values of `CRAWLNODE_TOKEN` or `PASSIMAGE_FILES_API_KEY`. Use `$CRAWLNODE_TOKEN` and `$PASSIMAGE_FILES_API_KEY` in shell only (the environment is injected per OpenClaw agent run when configured).
 
+## Exec host policy (mandatory)
+
+For this skill, always run `exec` on **gateway host**.
+
+- Set `host: "gateway"` on every `exec` tool call.
+- Do not use `host: "sandbox"` unless the user explicitly asks for sandbox isolation.
+- If a run fails because host was set to sandbox/auto, retry once with `host: "gateway"` before reporting failure.
+
 ## When to use
 
 **Always** use this skill when:
