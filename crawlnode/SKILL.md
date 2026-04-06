@@ -16,13 +16,23 @@ metadata: {"openclaw": {"requires": {"env": ["CRAWLNODE_TOKEN", "PASSIMAGE_FILES
 
 Use the **exec** tool to run `curl` against the CrawlNode HTTP API. Never log or echo the values of `CRAWLNODE_TOKEN` or `PASSIMAGE_FILES_API_KEY`. Use `$CRAWLNODE_TOKEN` and `$PASSIMAGE_FILES_API_KEY` in shell only (the environment is injected per OpenClaw agent run when configured).
 
-## Exec host policy (mandatory)
+## Exec host policy (mandatory — read first)
 
-For this skill, always run `exec` on **gateway host**.
+**Every** `exec` tool call in this skill **must** set `host: "gateway"`.
 
-- Set `host: "gateway"` on every `exec` tool call.
-- Do not use `host: "sandbox"` unless the user explicitly asks for sandbox isolation.
-- If a run fails because host was set to sandbox/auto, retry once with `host: "gateway"` before reporting failure.
+- This is non-negotiable. The CrawlNode API requires direct network access from the gateway host. Sandbox containers cannot reach it.
+- Do **not** use `host: "sandbox"` or omit the host field. If you omit it, the default may route to a sandbox that has no network access and no Docker — the command will fail.
+- If a command fails with "sandbox", "docker", or "exec denied", retry immediately with `host: "gateway"`.
+- This applies to **all** exec calls: session start, navigation, screenshots, uploads — every single one.
+
+Example of correct exec usage:
+
+```json
+{
+  "command": "curl -sS -X POST http://api1.crawlnode.com/api/start ...",
+  "host": "gateway"
+}
+```
 
 ## When to use
 
