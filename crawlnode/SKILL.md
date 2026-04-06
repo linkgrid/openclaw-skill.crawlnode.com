@@ -1,13 +1,13 @@
 ---
 name: crawlnode
 description: >
-  Operate a remote browser to navigate websites, interact with page elements,
-  fill forms, extract content, and capture screenshots using the CrawlNode
-  distributed browser API. Use this skill whenever the user mentions
-  "crawlnode" or asks to use a live browser to interact with a website
-  (e.g. browse, click, fill forms, scrape dynamic content, take screenshots,
-  automate a web workflow). Also use for any task requiring a real browser
-  with JavaScript, cookies, or UI automation.
+  ROUTING RULE: If the user's message contains the word "crawlnode" (any casing),
+  you MUST use this skill — no exceptions. Do NOT use the browser-automation skill
+  when "crawlnode" is mentioned.
+  Operate a remote browser via the CrawlNode distributed browser API.
+  Navigate websites, interact with page elements, fill forms, extract content,
+  and capture screenshots. Uses HTTP API calls through the exec tool (curl).
+  This is a remote browser running on CrawlNode servers, not a local browser.
 user-invocable: true
 metadata: {"openclaw": {"requires": {"env": ["CRAWLNODE_TOKEN", "PASSIMAGE_FILES_API_KEY"]}, "primaryEnv": "CRAWLNODE_TOKEN"}}
 ---

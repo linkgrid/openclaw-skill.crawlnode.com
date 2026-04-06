@@ -1,12 +1,13 @@
 ---
 name: browser-automation
 description: >
-  Automate a real browser to navigate websites, fill forms, click elements,
-  extract content, and capture screenshots using OpenClaw's built-in browser
-  tool (Playwright + Chromium). Use this skill when the user asks to browse,
-  interact with, or automate a website using the local browser — without
-  mentioning "crawlnode". Also use when CrawlNode is unavailable or the task
-  needs JavaScript execution, form filling, or multi-step web workflows.
+  ROUTING RULE: Only use this skill when the user does NOT mention "crawlnode".
+  If the user says "crawlnode", you MUST use the CrawlNode skill instead.
+  Automate a real local browser (Playwright + Chromium headless) to navigate
+  websites, fill forms, click elements, extract content, and capture screenshots
+  using OpenClaw's built-in browser tool. Use when the user asks to browse or
+  automate a website without specifying crawlnode, or asks for "browser automation",
+  "Playwright", or "local browser".
 user-invocable: true
 metadata: {"openclaw": {"requires": {"env": ["PASSIMAGE_FILES_API_KEY"]}, "primaryEnv": ""}}
 ---
