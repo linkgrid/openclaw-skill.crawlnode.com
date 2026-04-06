@@ -334,6 +334,35 @@ JSON errors often look like: `{"detail":"..."}`. Plain-text errors are possible 
 
 Before reporting a failure to the user, run the full **screenshot → upload → share** sequence (see **Screen capture**) when the session may still be alive, so the user can see what the remote browser showed.
 
+## Final reply format (mandatory — Slack-ready)
+
+Your reply to the user is delivered in Slack. It must be **human-friendly, not robotic**.
+
+**Rules for your final reply:**
+
+1. **Never reply with just a URL or "Done: URL".** Always describe what you did in plain language.
+2. **Never include internal directives** like `[[reply_to_current]]`, `[[...]]`, or any bracket commands. These are internal — the user must never see them.
+3. **Never include raw JSON, file paths, or technical output.** Summarize in plain English.
+4. **Format every action as a bullet with its screenshot URL.** Use this exact pattern:
+
+```
+- Navigated to https://www.example.com (https://s.passimage.in/f/abc123.png)
+- Entered VIN: 7SAYGDED4RF054825 and clicked Search (https://s.passimage.in/f/def456.png)
+- Results loaded — here's the summary (https://s.passimage.in/f/ghi789.png)
+```
+
+5. **End with a brief summary** if the task involved extracting information (e.g. VIN results, page content).
+6. **If the task was simple** (just "go to X and screenshot"), reply like: `Navigated to https://www.example.com and captured a screenshot: https://s.passimage.in/f/abc123.png`
+
+**Bad examples (never do this):**
+- `Done: https://s.passimage.in/f/abc123.png`
+- `[[reply_to_current]] https://s.passimage.in/f/abc123.png`
+- `Here is the screenshot URL: https://s.passimage.in/f/abc123.png`
+
+**Good examples:**
+- `Navigated to https://www.example.com and captured a screenshot: https://s.passimage.in/f/abc123.png`
+- `- Opened https://www.vinaudit.com (https://s.passimage.in/f/abc123.png)\n- Entered VIN and clicked Search (https://s.passimage.in/f/def456.png)\n- Results are below (https://s.passimage.in/f/ghi789.png)\n\nVehicle: 2024 Tesla Model Y, Clean title, 12,450 miles.`
+
 ## Important rules
 
 - Always call **/api/view** before relying on element identifiers; the tree changes after navigation and DOM updates.
