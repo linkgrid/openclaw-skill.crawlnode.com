@@ -19,6 +19,22 @@
       "collaborates_with": ["passimagein"]
     },
     {
+      "name": "browser-automation",
+      "path": "browser-automation/SKILL.md",
+      "description": "Local browser automation — navigate websites, fill forms, click elements, extract content, take screenshots using OpenClaw built-in browser (Playwright + Chromium).",
+      "capabilities": [
+        "browse-website",
+        "click-element",
+        "fill-form",
+        "take-screenshot",
+        "extract-page-content",
+        "run-javascript",
+        "multi-step-workflow"
+      ],
+      "requires_env": ["PASSIMAGE_FILES_API_KEY"],
+      "collaborates_with": ["passimagein"]
+    },
+    {
       "name": "passimagein",
       "path": "passimagein/SKILL.md",
       "description": "File upload and public URL sharing — upload screenshots, images, documents, and any file to s.passimage.in and get back a public URL.",
