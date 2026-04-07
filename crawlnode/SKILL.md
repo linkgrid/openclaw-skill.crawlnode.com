@@ -287,6 +287,7 @@ These rules help you complete tasks efficiently and avoid common failure modes.
 ### Element identification
 
 - Always call `/api/view` before interacting with a page. Never reuse element identifiers from a previous page state.
+- **Do not dump the entire /api/view response into your working context.** The view tree can be thousands of lines. After calling `/api/view`, scan the response for the specific elements you need (input fields, buttons, links relevant to your current step). Work with just those elements — not the full tree.
 - Search the view tree systematically: look for `control_type` values like `EditControl` (text fields), `ButtonControl` (buttons), and `HyperlinkControl` (links). Match by `name`, `automation_id`, or position.
 - When `automation_id` and `element_id` are both available, prefer `automation_id` — it is more stable across page reloads.
 - If the view tree does not clearly expose the target element, try these fallbacks in order: (a) look for coordinate-based `element_id` values near the expected screen region, (b) use `/api/network` to discover form endpoints and submit data directly, (c) resize the window with `/api/resize` and re-fetch `/api/view` — some elements only appear at certain viewport sizes.
@@ -298,9 +299,9 @@ These rules help you complete tasks efficiently and avoid common failure modes.
 
 ### Script structure
 
-- Keep each `exec` call focused on a single logical step: start a session, navigate to a page, interact with an element, or take a screenshot. Avoid writing a single monolithic script that does everything — if one step fails in a large script, the error is harder to diagnose and recover from.
-- Use a cleanup trap (`trap cleanup EXIT`) in every script that creates a session, so `/api/destroy` is always called even if the script fails partway through.
-- Store intermediate results (view trees, screenshots) in a temporary directory and clean up after.
+- **One API call per exec.** Each exec call should do ONE thing: start a session, navigate, view, click, input, screenshot, or upload. Do not combine multiple API calls into a single script. Do not write Python parsers inside exec. If you need to parse JSON, let the LLM read the raw output — do not pipe it through jq/python inside the script.
+- **Keep exec output small.** The output of every exec call goes into your conversation context. Large outputs slow you down. If `/api/view` returns a huge tree, read only what you need from it — do not echo the entire response.
+- If you need a cleanup trap for `/api/destroy`, that is the ONE exception where a script may contain two API calls (the main call + destroy in the trap).
 - **Exec approvals are handled automatically.** Do not ask the user for approval, do not include `/approve` instructions in your response, and do not wait for manual approval. Simply run the `exec` command — it will be approved and executed. Wait for the tool result, then include the output (such as screenshot URLs) in your reply to the user.
 
 ### Retries and failure limits
