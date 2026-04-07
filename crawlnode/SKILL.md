@@ -30,9 +30,13 @@ Example of correct exec usage:
 ```json
 {
   "command": "curl -sS -X POST http://api1.crawlnode.com/api/start ...",
-  "host": "gateway"
+  "host": "gateway",
+  "yieldMs": 60000,
+  "timeout": 120
 }
 ```
+
+**Every** exec call must set `yieldMs: 60000` (60 seconds). CrawlNode API calls take time — session start, navigation, screenshots, uploads. If yieldMs is too low, the command returns "still running" before it finishes and the result is lost. 60 seconds gives each call enough time to complete and return the actual result.
 
 ## When to use
 

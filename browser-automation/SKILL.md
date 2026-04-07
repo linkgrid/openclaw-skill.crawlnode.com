@@ -237,7 +237,7 @@ Your reply goes to Slack. Read the user's original request, then reply with what
 
 ## Important rules
 
-- **Do not use the exec tool for browser actions.** Use the `browser` tool directly. Only use `exec` for uploading screenshots to Passimage.
+- **Do not use the exec tool for browser actions.** Use the `browser` tool directly. Only use `exec` for uploading screenshots to Passimage. When using exec, always set `yieldMs: 60000` and `timeout: 120` so the upload has time to finish.
 - **Do not use CSS selectors for click/type.** Use refs from snapshots.
 - **Always snapshot before interacting.**
 - **Every screenshot must be uploaded and shared.** Use the file path from the browser tool's screenshot result, upload via Passimage curl, and include the public URL in your reply. No exceptions.
