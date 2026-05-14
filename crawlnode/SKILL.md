@@ -346,15 +346,6 @@ Do **not** rely on tool output alone to convey the answer. The user sees only yo
 
 Even if you hit an error, a 5xx, or a retry limit: still destroy the session if possible, then write a final summary describing what you tried and what was captured before the failure. Include any screenshot URLs you already have.
 
-## Efficiency rules (avoid hitting tool-call limits)
-
-Each Slack run has a maximum number of tool calls (exec calls count). Long tasks can run out of budget before they finish. To stay efficient:
-
-- **One logical step per exec call.** Do not bundle navigation + screenshot + upload into a giant inline script unless the steps are tightly coupled.
-- **Do not re-screenshot or re-call `/api/view`** without an intervening action that actually changed the page.
-- **Stream short progress sentences** between major exec calls. Brief assistant text between tool calls reassures the user and ensures partial progress lands in Slack even if the run is cut short later.
-- **Combine capture → upload → echo** into a single exec call when reasonable, so one call produces both the file and the public URL.
-
 ## Important rules
 
 - Always call **/api/view** before relying on element identifiers; the tree changes after navigation and DOM updates.
