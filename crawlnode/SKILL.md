@@ -30,13 +30,9 @@ Example of correct exec usage:
 ```json
 {
   "command": "curl -sS -X POST http://api1.crawlnode.com/api/start ...",
-  "host": "gateway",
-  "yieldMs": 60000,
-  "timeout": 120
+  "host": "gateway"
 }
 ```
-
-**Every** exec call must set `yieldMs: 60000` (60 seconds). CrawlNode API calls take time — session start, navigation, screenshots, uploads. If yieldMs is too low, the command returns "still running" before it finishes and the result is lost. 60 seconds gives each call enough time to complete and return the actual result.
 
 ## When to use
 
@@ -291,7 +287,6 @@ These rules help you complete tasks efficiently and avoid common failure modes.
 ### Element identification
 
 - Always call `/api/view` before interacting with a page. Never reuse element identifiers from a previous page state.
-- **Do not dump the entire /api/view response into your working context.** The view tree can be thousands of lines. After calling `/api/view`, scan the response for the specific elements you need (input fields, buttons, links relevant to your current step). Work with just those elements — not the full tree.
 - Search the view tree systematically: look for `control_type` values like `EditControl` (text fields), `ButtonControl` (buttons), and `HyperlinkControl` (links). Match by `name`, `automation_id`, or position.
 - When `automation_id` and `element_id` are both available, prefer `automation_id` — it is more stable across page reloads.
 - If the view tree does not clearly expose the target element, try these fallbacks in order: (a) look for coordinate-based `element_id` values near the expected screen region, (b) use `/api/network` to discover form endpoints and submit data directly, (c) resize the window with `/api/resize` and re-fetch `/api/view` — some elements only appear at certain viewport sizes.
@@ -303,9 +298,9 @@ These rules help you complete tasks efficiently and avoid common failure modes.
 
 ### Script structure
 
-- **One API call per exec.** Each exec call should do ONE thing: start a session, navigate, view, click, input, screenshot, or upload. Do not combine multiple API calls into a single script. Do not write Python parsers inside exec. If you need to parse JSON, let the LLM read the raw output — do not pipe it through jq/python inside the script.
-- **Keep exec output small.** The output of every exec call goes into your conversation context. Large outputs slow you down. If `/api/view` returns a huge tree, read only what you need from it — do not echo the entire response.
-- If you need a cleanup trap for `/api/destroy`, that is the ONE exception where a script may contain two API calls (the main call + destroy in the trap).
+- Keep each `exec` call focused on a single logical step: start a session, navigate to a page, interact with an element, or take a screenshot. Avoid writing a single monolithic script that does everything — if one step fails in a large script, the error is harder to diagnose and recover from.
+- Use a cleanup trap (`trap cleanup EXIT`) in every script that creates a session, so `/api/destroy` is always called even if the script fails partway through.
+- Store intermediate results (view trees, screenshots) in a temporary directory and clean up after.
 - **Exec approvals are handled automatically.** Do not ask the user for approval, do not include `/approve` instructions in your response, and do not wait for manual approval. Simply run the `exec` command — it will be approved and executed. Wait for the tool result, then include the output (such as screenshot URLs) in your reply to the user.
 
 ### Retries and failure limits
@@ -339,15 +334,26 @@ JSON errors often look like: `{"detail":"..."}`. Plain-text errors are possible 
 
 Before reporting a failure to the user, run the full **screenshot → upload → share** sequence (see **Screen capture**) when the session may still be alive, so the user can see what the remote browser showed.
 
-## Final reply (mandatory — Slack-ready)
+## Always finish with a final summary message (MANDATORY)
 
-Your reply goes to Slack. Read the user's original request, then reply with what was done and what they asked for.
+When the task is done — successfully **or** with an error — your very last message must be a short text summary written **outside any tool call**, addressed to the user. It must include:
 
-- **Answer the request.** If they asked for a screenshot, give them the screenshot URL. If they asked for data, give them the data. If they asked for both, give both.
-- **Describe what you did, not how you did it.** The user does not care about tool calls, file paths, JSON, or internal mechanics. They care about the result.
-- **Never include** `[[reply_to_current]]`, `[[...]]`, raw JSON, local file paths, or any internal directives. These must never appear in your reply.
-- **Never reply with just a bare URL or "Done: URL".** Always include context — what site, what action, what result.
-- **Include screenshot URLs inline** with the action they relate to. Each screenshot should be next to the step it shows.
+1. A one-sentence statement of what you accomplished (or where you stopped).
+2. Every screenshot URL you uploaded, in order, one per line in the `- <action> (<URL>)` format.
+3. Any structured data you extracted (as plain text or a short list).
+
+Do **not** rely on tool output alone to convey the answer. The user sees only your assistant text — they do not see raw tool logs. If you do not write a final summary, the user will see an empty or incomplete reply even though the task ran.
+
+Even if you hit an error, a 5xx, or a retry limit: still destroy the session if possible, then write a final summary describing what you tried and what was captured before the failure. Include any screenshot URLs you already have.
+
+## Efficiency rules (avoid hitting tool-call limits)
+
+Each Slack run has a maximum number of tool calls (exec calls count). Long tasks can run out of budget before they finish. To stay efficient:
+
+- **One logical step per exec call.** Do not bundle navigation + screenshot + upload into a giant inline script unless the steps are tightly coupled.
+- **Do not re-screenshot or re-call `/api/view`** without an intervening action that actually changed the page.
+- **Stream short progress sentences** between major exec calls. Brief assistant text between tool calls reassures the user and ensures partial progress lands in Slack even if the run is cut short later.
+- **Combine capture → upload → echo** into a single exec call when reasonable, so one call produces both the file and the public URL.
 
 ## Important rules
 
@@ -355,6 +361,7 @@ Your reply goes to Slack. Read the user's original request, then reply with what
 - Prefer **automation_id** over **element_id** when practical.
 - Always **/api/destroy** when done.
 - Enable **extension: true** only when network capture is needed.
-- **Every screenshot must be uploaded and shared.** Save with `--output`, upload via Passimage, and include the public URL in your reply. No exceptions — never take a screenshot without uploading and sharing it.
-- Do not embed user-controlled strings directly into shell commands without proper quoting/escaping—prefer writing JSON bodies via a here-doc or a safely quoted file to avoid injection.
+- **Every screenshot must be uploaded and shared.** Save with `--output <exact path>`, upload via PassImageIn using that **same exact path**, and include the public URL in your reply. The path you upload **must** be the path you just wrote with `--output` in this same step — never search the disk for `.png` files. See `passimagein/SKILL.md` for the full upload rules.
+- **Always finish with a final summary message** that includes every screenshot URL and any extracted data (see section above).
+- Do not embed user-controlled strings directly into shell commands without proper quoting/escaping — prefer writing JSON bodies via a here-doc or a safely quoted file to avoid injection.
 - For full schemas and examples, see `docs/CRAWLNODE-API-DOCUMENTATION.md` in this repository.

@@ -14,7 +14,7 @@ metadata: {"openclaw": {"requires": {"env": ["PASSIMAGE_FILES_API_KEY"]}, "prima
 
 # Browser Automation (built-in)
 
-Use the **browser** tool to control OpenClaw's local Chromium browser. Do **not** use the `exec` tool for browser actions — the `browser` tool handles everything directly. Only use `exec` for uploading screenshots to Passimage.
+Use the **browser** tool to control OpenClaw's local Chromium browser. Do **not** use the `exec` tool for browser actions — the `browser` tool handles everything directly.
 
 ## When to use
 
@@ -75,11 +75,7 @@ Use the **ref** from the snapshot to target elements:
 { "tool": "browser", "action": "press", "params": { "key": "Enter" } }
 ```
 
-### 4. Screenshot — capture, upload, share (mandatory)
-
-> **Mandatory rule — screenshot → upload → share.**
-> Every time you take a screenshot you **must** upload it and share the
-> public URL with the user. There are no exceptions.
+### 4. Screenshot (after every visible change)
 
 ```json
 { "tool": "browser", "action": "screenshot" }
@@ -87,72 +83,79 @@ Use the **ref** from the snapshot to target elements:
 
 Take a screenshot after every navigation, click, or form submission that changes the page.
 
-The browser tool returns a result containing the **local file path** where the screenshot was saved. Look for the `path` or `mediaUrl` field in the result — it will be something like:
+## Screenshot → upload → share (MANDATORY)
 
-```
-/home/autoscale/.openclaw/media/browser/eb0555ad-87db-4d21-bf8c-7cf794f83277.png
-```
+> **Every screenshot you take MUST be uploaded to PassImageIn and shared as a public URL in your reply.** No exceptions. Never reply with a local file path. Never skip the upload step.
 
-**You MUST use this exact file path to upload to Passimage.** Do NOT try to re-capture the screenshot via the CLI or redirect stdout. The browser tool already saved the file — just upload it.
+### Step 1 — Read the path from the tool result (do NOT search the disk)
 
-#### Combined example (capture → upload → share)
+When the `browser.screenshot` tool returns, the result is a JSON object that contains the **exact file path** the browser just wrote. Read it from the result fields, in this order of preference:
+
+1. `details.path`  — the absolute file path on the gateway (preferred)
+2. `details.media.mediaUrl` — present on newer gateway versions
+3. `details.media.path` — fallback for older gateways
+4. `path` — fallback at the top level
+
+> **CRITICAL — do not list, glob, or guess the path.**
+> Never run `ls -t *.png`, `ls /tmp`, `find ...`, or anything similar to look for the screenshot file. There are old screenshots from earlier runs sitting in `/tmp` and the workspace; picking by modification time or extension will silently upload the **wrong** image. The only correct path is the one the screenshot tool returned **on this turn**.
+>
+> The file extension is also not fixed — the browser tool may save `.png` **or** `.jpg`. Treat the extension as whatever appears at the end of the returned path. Do not assume `.png`.
+
+### Step 2 — Upload via PassImageIn
+
+Use the path you read in Step 1. Compute `<mime-type>` and `<filename>` from that exact path:
+
+- If the path ends in `.png` → `Content-Type: image/png`
+- If the path ends in `.jpg` or `.jpeg` → `Content-Type: image/jpeg`
+- `<filename>` = the basename of the path (e.g. `browser-1730000000.png`).
+
+Run the upload through the **exec** tool with `"host": "gateway"`:
 
 ```bash
-# 1. The browser tool screenshot action already saved the file.
-#    Get the path from the screenshot result (e.g. details.path or details.media.mediaUrl).
-#    Example: /home/autoscale/.openclaw/media/browser/eb0555ad.png
-
-# 2. Upload — use the file path from step 1:
-SCREENSHOT_URL=$(curl -s -X POST "https://s.passimage.in/upload" \
+SCREENSHOT_URL=$(curl -sS -X POST "https://s.passimage.in/upload" \
   -H "X-API-Key: $PASSIMAGE_FILES_API_KEY" \
-  -H "Content-Type: image/png" \
-  -H "X-Filename: browser-screenshot.png" \
-  --data-binary "@/home/autoscale/.openclaw/media/browser/eb0555ad.png")
-
-# 3. Share — the response JSON has a "url" field. Include it in your reply.
+  -H "Content-Type: <mime-type>" \
+  -H "X-Filename: <filename>" \
+  --data-binary "@<exact-path-from-screenshot-result>")
 echo "$SCREENSHOT_URL"
 ```
 
-Always include the returned URL in your **very next reply** to the user. If the upload fails, retry once; if it still fails, tell the user the upload failed and continue.
+The response body is the public URL as plain text (e.g. `https://s.passimage.in/f/8d5ee2e3d5c3.png`).
 
-#### How to present screenshots to the user
+If the upload fails, retry **once**. If it fails twice, tell the user the upload failed for that screenshot and keep going — do **not** loop.
 
-After every action that changes the page, report what you did and include the screenshot URL. Examples:
+### Step 3 — Share the URL with the user
+
+Mention the URL in your next reply. After every action that changed the page, write one line in this format:
 
 ```
-- Navigated to: https://www.example.com (https://s.passimage.in/f/abc123.png)
-- Clicked the button "Submit" (https://s.passimage.in/f/def456.png)
-- Filled VIN field and submitted (https://s.passimage.in/f/ghi789.png)
+- <action description> (<screenshot URL>)
 ```
 
-Format: `- <action description> (<screenshot URL>)`
+Examples:
 
-#### When to screenshot
-
-Take a screenshot **immediately** after:
-
-- Navigation (`navigate` action)
-- Any click or form submission that changes the page
-- Before reporting an error to the user
-- When in doubt — the cost of an extra screenshot is low
-
-### 5. Extract text (when needed)
-
-```json
-{ "tool": "browser", "action": "extract_text", "params": { "selector": "div.results" } }
+```
+- Navigated to https://www.example.com (https://s.passimage.in/f/8d5ee2e3d5c3.png)
+- Clicked the "Sign in" button (https://s.passimage.in/f/8d5ee2e3d5c4.png)
 ```
 
-Or use JavaScript evaluation for structured data:
+## Always finish with a final summary message (MANDATORY)
 
-```json
-{ "tool": "browser", "action": "evaluate", "params": { "script": "() => document.title" } }
-```
+When the task is done — successfully **or** with an error — your very last message must be a short text summary written **outside any tool call**, addressed to the user. It must include:
+
+1. A one-sentence statement of what you accomplished (or where you stopped).
+2. Every screenshot URL you uploaded, in order, one per line.
+3. Any structured data you extracted (as plain text or a short list).
+
+Do **not** rely on tool output alone to convey the answer. The user does not see tool logs directly — they see only your assistant text. If you do not write a final summary, the user will see an empty or incomplete reply.
+
+Even if you hit an error or a retry limit, still write a final summary describing what you tried and what was captured before the failure.
 
 ## Interaction rules (mandatory)
 
 1. **Always snapshot before interacting.** Never reuse refs from a previous snapshot — they become invalid after any page change.
 2. **Use refs, not CSS selectors, for click/type/fill.** Refs from snapshots are more reliable.
-3. **Screenshot after every visible change.** Navigation, clicks, form submissions — screenshot each time, upload to Passimage, and share the URL.
+3. **Screenshot after every visible change.** Navigation, clicks, form submissions — screenshot each time so the user sees what happened, then upload it (see above).
 4. **Wait for dynamic content.** After navigation or clicks that trigger loading, wait 2-3 seconds before snapshotting. Use the wait action if needed.
 5. **One action per tool call.** Do not try to batch multiple actions in one call.
 
@@ -204,14 +207,23 @@ After scrolling, **always re-snapshot** to see the updated elements.
 7. Fill or type the next value.
 8. Click the submit button (by ref).
 9. Wait 3-5 seconds for results.
-10. Screenshot the result page → upload to Passimage → share URL.
+10. Screenshot the result page, upload it, and share the URL.
 11. Snapshot the result page and extract relevant text.
+
+## Efficiency rules (avoid hitting tool-call limits)
+
+Each Slack run has a maximum number of tool calls. Long tasks can run out of budget before they finish. To stay efficient:
+
+- **Do not screenshot the same page twice** unless something actually changed.
+- **Do not re-snapshot** without an intervening action.
+- **Batch related extractions** when possible (e.g. one `evaluate` returning multiple fields instead of three `extract_text` calls).
+- **Stream short progress sentences** between major steps. Brief assistant text between tool calls reassures the user that work is happening, and ensures partial progress lands in Slack even if the run is cut short later.
 
 ## Retry strategy
 
 - If an action fails (element not found, timeout), **re-snapshot** and try with a fresh ref.
 - If the same action fails twice, try a different approach: scroll, wait longer, or use a different element.
-- After 3 failed attempts on the same step, **stop and report** what happened to the user with a screenshot.
+- After 3 failed attempts on the same step, **stop and report** what happened to the user, including any screenshot URLs you have, and a final summary message.
 - Never loop indefinitely.
 
 ## Error handling
@@ -220,27 +232,18 @@ After scrolling, **always re-snapshot** to see the updated elements.
 |-----------|------------|
 | Element ref not found | Re-snapshot, find the correct ref |
 | Page didn't load | Wait 5 seconds, try navigate again |
-| Timeout on action | Screenshot current state, retry once |
+| Timeout on action | Screenshot current state, upload, retry once |
 | Element not in snapshot | Scroll down (PageDown), re-snapshot |
 | Form field not fillable | Try click first, then fill |
 | Browser not running | Report to user — browser needs to be started |
+| Screenshot upload failed twice | Tell the user the upload failed for that step and continue |
 
-## Final reply (mandatory — Slack-ready)
+## Important rules (summary)
 
-Your reply goes to Slack. Read the user's original request, then reply with what was done and what they asked for.
-
-- **Answer the request.** If they asked for a screenshot, give them the screenshot URL. If they asked for data, give them the data. If they asked for both, give both.
-- **Describe what you did, not how you did it.** The user does not care about tool calls, file paths, JSON, or internal mechanics. They care about the result.
-- **Never include** `[[reply_to_current]]`, `[[...]]`, raw JSON, local file paths, or any internal directives. These must never appear in your reply.
-- **Never reply with just a bare URL or "Done: URL".** Always include context — what site, what action, what result.
-- **Include screenshot URLs inline** with the action they relate to. Each screenshot should be next to the step it shows.
-
-## Important rules
-
-- **Do not use the exec tool for browser actions.** Use the `browser` tool directly. Only use `exec` for uploading screenshots to Passimage. When using exec, always set `yieldMs: 60000` and `timeout: 120` so the upload has time to finish.
+- **Do not use the exec tool for browser actions.** Use the `browser` tool directly.
 - **Do not use CSS selectors for click/type.** Use refs from snapshots.
 - **Always snapshot before interacting.**
-- **Every screenshot must be uploaded and shared.** Use the file path from the browser tool's screenshot result, upload via Passimage curl, and include the public URL in your reply. No exceptions.
-- **Do not try to capture screenshots via CLI redirect.** The `browser` tool's screenshot action already saves the image to a file. Use that file path directly.
+- **Always screenshot after visible changes.**
+- **Every screenshot must be uploaded via PassImageIn and shared as a public URL.** Use the exact path from the screenshot tool result — never search the disk for files.
+- **Always finish with a final summary message** that includes every screenshot URL and any extracted data.
 - **Do not mix this skill with CrawlNode.** They are separate tools for separate purposes.
-- **Exec approvals are handled automatically.** Do not ask the user for approval. Simply run the exec command — it will be approved and executed.
