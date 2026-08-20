@@ -16,13 +16,28 @@ metadata: {"openclaw": {"requires": {"env": ["PASSIMAGE_FILES_API_KEY"]}, "prima
 
 Use the **browser** tool to control OpenClaw's local Chromium browser. Do **not** use the `exec` tool for browser actions — the `browser` tool handles everything directly. Only use `exec` for uploading screenshots to Passimage.
 
+## HARD RULES — read before doing anything else (mandatory, no exceptions)
+
+These rules exist because Asa (this deployment) is a shared, stateless Slack bot. When something breaks, the ONLY correct response is to report it plainly and stop — never improvise workarounds.
+
+1. **Never launch a browser via `exec`.** Do NOT run `google-chrome`, `chromium`, `chromium-browser`, `firefox`, `wkhtmltoimage`, `wkhtmltopdf`, `pageres`, `cutycapt`, `playwright`, `webkit2png`, or any similar command through `exec`. The `browser` tool is the ONLY approved way to open a browser on this machine.
+
+2. **Never write a script (Node/Python/Bash) that spawns Chrome or Playwright.** Not via `write` + `exec`, not via heredoc, not via anything else. If the `browser` tool cannot do it, it does not get done.
+
+3. **If the `browser` tool returns any error, STOP.** Do not retry, do not switch tools, do not investigate available binaries with `command -v`, `which`, or `firefox --help`. Reply to the user with exactly this template and end the run:
+
+   > The browser is temporarily unavailable — please try again in 30 seconds. If it keeps failing, an admin can hit the "Reset Browser" button in the Asa admin panel.
+
+4. **Do not read workspace memory files at the start of a run.** Do not read `~/.openclaw/workspace/SOUL.md`, `USER.md`, `MEMORY.md`, or anything under `~/.openclaw/workspace/memory/`. Session memory is disabled in this deployment and those reads waste tokens and time on files that are either empty or non-existent.
+
+5. **One retry maximum per browser action, only for genuinely transient errors** (element ref stale after a page mutation, or network timeout on `navigate`). Errors like "profile in use," "timed out," "Chrome CDP failed to start," or anything that mentions a lock file are NOT transient — apply rule 3 immediately.
+
 ## When to use
 
 Use this skill when:
 
 - The user asks to **browse a website**, **fill a form**, **click buttons**, **extract text**, or **take a screenshot** — and does **not** mention "crawlnode".
 - The user explicitly asks for **browser automation**, **Playwright**, or **local browser**.
-- CrawlNode is unavailable or has failed, and the user wants a fallback.
 
 Do **not** use this skill when:
 
@@ -181,25 +196,19 @@ After scrolling, **always re-snapshot** to see the updated elements.
 10. Screenshot the result page → upload to Passimage → share URL.
 11. Snapshot the result page and extract relevant text.
 
-## Retry strategy
-
-- If an action fails (element not found, timeout), **re-snapshot** and try with a fresh ref.
-- If the same action fails twice, try a different approach: scroll, wait longer, or use a different element.
-- After 3 failed attempts on the same step, **stop and report** what happened to the user with a screenshot.
-- Never loop indefinitely.
-
-## Error handling
+## Error handling (see HARD RULES above — they take precedence)
 
 | Situation | What to do |
 |-----------|------------|
-| Element ref not found | Re-snapshot, find the correct ref |
-| Page didn't load | Wait 5 seconds, try navigate again |
-| Timeout on action | Screenshot current state, retry once |
+| Element ref not found | Re-snapshot ONCE, find the correct ref |
+| Page didn't load | Wait 5 seconds, retry `navigate` ONCE |
+| Timeout on a specific action | Screenshot current state, retry ONCE |
 | Element not in snapshot | Scroll down (PageDown), re-snapshot |
 | Form field not fillable | Try click first, then fill |
-| Browser not running | Report to user — browser needs to be started |
+| **Browser tool returns ANY error mentioning "profile", "lock", "CDP", "timed out"** | **STOP. Apply HARD RULE 3.** |
+| **Browser tool crashes or hangs** | **STOP. Apply HARD RULE 3.** |
 
-## Important rules
+## Important rules (recap)
 
 - **Do not use the exec tool for browser actions.** Use the `browser` tool directly.
 - **Do not use CSS selectors for click/type.** Use refs from snapshots.
@@ -207,3 +216,4 @@ After scrolling, **always re-snapshot** to see the updated elements.
 - **Always screenshot after visible changes.**
 - **Every screenshot must be uploaded and shared.** Use `details.path` from the screenshot result as the file to upload. Never search for files with `ls` or `find`.
 - **Do not mix this skill with CrawlNode.** They are separate tools for separate purposes.
+- **When the browser tool errors, STOP.** See HARD RULES at the top of this file.
