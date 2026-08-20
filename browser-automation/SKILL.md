@@ -32,6 +32,10 @@ These rules exist because Asa (this deployment) is a shared, stateless Slack bot
 
 5. **One retry maximum per browser action, only for genuinely transient errors** (element ref stale after a page mutation, or network timeout on `navigate`). Errors like "profile in use," "timed out," "Chrome CDP failed to start," or anything that mentions a lock file are NOT transient — apply rule 3 immediately.
 
+6. **A screenshot without a shared URL is a failed run.** Every single time you call `browser` with `action: "screenshot"`, your VERY NEXT action MUST be an `exec` (with `host: "gateway"`) that uploads `details.path` to `https://s.passimage.in/upload` using the curl command in section 4 below, and your reply to the user MUST include the returned URL on its own line. There are NO exceptions — not for "quick" screenshots, not for "obvious" content, not for "the user can see the image name." A message that says "here's the screenshot" without a `https://s.passimage.in/...` URL is broken and wastes the user's time. If the upload command itself fails, report the exact stderr — do not send a text-only "here's the screenshot" reply.
+
+7. **Do not shorten the reply on the assumption that the screenshot is visible.** Slack does NOT render local `/home/autoscale/...` paths. The Passimage URL is the ONLY thing the user actually sees. Include it or the run has produced nothing.
+
 ## When to use
 
 Use this skill when:
