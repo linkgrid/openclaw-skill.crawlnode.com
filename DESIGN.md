@@ -1,11 +1,12 @@
 # OpenClaw Multi-Agent Design
 
-**Status:** DRAFT — architecture blueprint for the classifier + specialist refactor.
+**Status:** LIVE on Claw2. Claw1 pending (machine offline in office at time of writing).
 **Last updated:** August 24, 2026.
 **Applies to:** OpenClaw gateways running on Claw1 and Claw2, driven by the [Asa Cloudflare Worker](https://github.com/linkgrid/asa-cf-worker.autoscale.team) from Slack.
-**Sister document:** the phase-by-phase implementation plan at `docs/OPENCLAW_MULTI_AGENT_PLAN.md` in the Asa repo.
 
 Written in plain language for non-developers. Every technical term is explained in the glossary below.
+
+> **Known open bug (Aug 24 2026):** Slack requests still fail with `_No response._` even after two Asa-side patches (protocol version negotiation and per-yield terminal suppression). CLI runs on Claw2 succeed end-to-end. The Cloudflare Worker's `chat()` generator terminates after the parent's `sessions_yield` in ways we haven't fully diagnosed. **See section 11 "Known issues" and the handoff notes at the bottom of this doc.**
 
 ---
 
@@ -15,82 +16,64 @@ If you already know these, skip. If a section confuses you later, come back here
 
 | Term | Plain-English meaning |
 |---|---|
-| **Agent** | One AI "brain" with its own workspace, memory, tools, and personality. OpenClaw can host multiple agents on the same machine, each isolated from the others. Today we have one (`main`). We are moving to three. |
-| **Skill** | A markdown instructions file (`SKILL.md`) that tells an agent how to do one specific job (e.g. take a screenshot). It's like a company procedures manual. Not code — just prose the AI reads. |
-| **Workspace** | A folder on disk that is one agent's "home." Contains its `AGENTS.md` (personality/rules), its local files, its memory. Each agent has a separate one. |
+| **Agent** | One AI "brain" with its own workspace, memory, tools, and personality. OpenClaw hosts multiple agents on the same machine, each isolated from the others. On each Claw we now have three: `main`, `browser-agent`, `crawlnode-agent`. |
+| **Skill** | A markdown instructions file (`SKILL.md`) that tells an agent how to do one specific job (e.g. take a screenshot). It's like a company procedures manual — not code, just prose the AI reads. |
+| **Workspace** | A folder on disk that is one agent's "home." Contains its `AGENTS.md` (personality/rules), local files, memory. Each agent has a separate one. |
 | **`AGENTS.md`** | The system prompt for one agent. Auto-loaded by OpenClaw every time that agent starts a session. Think of it as the agent's job description. |
-| **`SKILLS.json`** | A small table listing every skill available on the machine, what each does, and which skills chain together (e.g. `browser-automation` chains with `passimagein`). The classifier reads this to pick specialists. |
-| **`sessions_spawn`** | Built-in OpenClaw tool. One agent uses it to hand a task to another agent. Think: making a phone call to a coworker. Non-blocking — the caller doesn't wait. |
-| **`sessions_yield`** | Built-in OpenClaw tool. After spawning, the caller uses this to say "wake me up when my coworker finishes." Prevents wasteful waiting. |
-| **Depth** | How deep the agent-calling-agent tree goes. Classifier = depth 0. Specialist = depth 1. Sub-sub-agent would be depth 2. We cap at 1 for now (specialists cannot spawn further). |
-| **Announce** | When a specialist finishes, OpenClaw automatically delivers its result back to the caller. That delivery is called an "announce." |
-| **Classifier** | Nickname for the `main` agent in the new design. Its only job is to pick which specialist should handle each request. It doesn't do the work itself. |
-| **Specialist** | Nickname for the sub-agents that do the actual work (`browser-agent`, `crawlnode-agent`, later `calendar-agent`). Each has a narrow skill set. |
-| **`SKILL.md` "collaborates_with" field** | A hint in SKILLS.json that says "this skill usually needs to be chained with another." E.g. `browser-automation` collaborates_with `passimagein` because screenshots need to be uploaded to get a URL. |
-| **`maxSpawnDepth`** | OpenClaw setting for the depth cap above. `1` = only classifier can spawn. `2` = specialists can also spawn workers. We start at `1`. |
-| **Announce** | See above — the delivery of a specialist's result back to the classifier. |
-| **`refresh-openclaw.sh`** | A bash script on each Claw that pulls this repo from GitHub and copies the skill/agent files into place, then restarts the gateway. It's the deployment mechanism. |
+| **`SKILLS.json`** | A small table listing every skill available on the machine, what each does, and which skills chain together (e.g. `browser-automation` chains with `passimagein`). |
+| **`sessions_spawn`** | Built-in OpenClaw tool. One agent uses it to hand a task to another agent. Non-blocking — the caller doesn't wait. |
+| **`sessions_yield`** | Built-in OpenClaw tool. After spawning, the caller uses this to say "wake me up when the child finishes." |
+| **Depth** | How deep the agent-calling-agent tree goes. Classifier = depth 0. Specialist = depth 1. We cap at 1 (specialists cannot spawn further). |
+| **Announce** | When a specialist finishes, OpenClaw automatically delivers its result back to the caller as a new user message. That delivery is called an "announce." |
+| **Classifier** | The `main` agent. Its only job is to pick which specialist should handle each request. It doesn't do the work itself. |
+| **Specialist** | Sub-agents that do the actual work (`browser-agent`, `crawlnode-agent`). Each has a narrow skill set. |
+| **`refresh-openclaw.sh`** | A bash script on each Claw that pulls this repo from GitHub and installs every skill, AGENTS.md, helper script, and config change, then restarts the gateway. See section 8. |
+| **Overlay** | `openclaw-config/multi-agent-overlay.json5`. A partial OpenClaw config that gets merged into `~/.openclaw/openclaw.json` via `openclaw config patch`. Non-invasive: only touches the `agents` and `acp` sections. |
 
 ---
 
 ## 1) Problem statement
 
-Today a single OpenClaw agent per Claw does everything: reads the user's Slack message, reads whatever skill file it thinks is relevant, and executes the tools itself. Two failure modes have shown up repeatedly:
+Previously a single OpenClaw agent per Claw did everything: read the user's Slack message, chose whichever skill file it thought was relevant, and executed the tools itself. Two failure modes repeated:
 
-1. **Skipped mandatory steps.** The agent takes a screenshot but forgets to upload it to Passimage, so the Slack reply says "here's the screenshot" with no URL. The screenshot exists on disk on the Claw but the user never sees it.
-2. **Improvisation after failure.** When the built-in browser tool errors out (e.g. Chrome profile lock), the agent tries workaround after workaround — `exec google-chrome`, `exec chromium`, `write` a script that spawns Playwright — until it hits its 25-minute or 45-tool-call limit and returns nothing. We call this "spiraling."
+1. **Skipped mandatory steps.** The agent took a screenshot but forgot to upload it to Passimage, so the Slack reply said "here's the screenshot" with no URL.
+2. **Improvisation after failure.** When the built-in browser tool errored out, the agent tried `exec google-chrome`, `exec chromium`, then wrote a Python script — until it hit its 25-minute or 45-tool-call limit and returned nothing ("spiraling").
 
-The root cause of both is the same: **one brain has to remember all the rules for all the skills at once**, and it doesn't. Some rules get dropped.
+Root cause: **one brain had to remember all the rules for all the skills at once**, and it dropped some.
 
-The [skills repo README](README.md) already draws an aspirational picture of a "classifier + sub-agent" architecture that would solve this, but nothing in the current runtime enforces that picture. It's ASCII art without a backing implementation.
-
-## 2) Current architecture (as-is)
+## 2) Target architecture (live on Claw2 today)
 
 ```mermaid
 flowchart TB
     User[User in Slack] --> Asa[Asa Cloudflare Worker]
-    Asa -->|WebSocket over Cloudflare Tunnel| Gateway[OpenClaw Gateway on Claw1 or Claw2]
-    Gateway --> MainAgent["main agent<br/>gpt-5.4<br/>ALL skills visible<br/>ALL tools visible"]
-    MainAgent -->|reads on demand| SkillFiles["skills SKILL.md files<br/>browser-automation<br/>crawlnode<br/>passimagein"]
-    MainAgent -->|executes| Tools["browser, exec,<br/>read, write"]
-```
+    Asa -->|WebSocket over Cloudflare Tunnel| Gateway[OpenClaw Gateway]
+    Gateway --> Classifier["main classifier<br/>gpt-5.6-luna small/fast<br/>Skills: NONE<br/>Tools: sessions_spawn, sessions_yield,<br/>read, agents_list"]
 
-**Weakness in one sentence:** the same agent picks the skill AND executes the skill AND enforces the skill's rules — so any rule it forgets is silently dropped.
-
-## 3) Target architecture (to-be)
-
-```mermaid
-flowchart TB
-    User[User in Slack] --> Asa[Asa Cloudflare Worker]
-    Asa -->|unchanged WebSocket| Gateway[OpenClaw Gateway]
-    Gateway --> Classifier["main classifier<br/>gpt-5.6-luna small fast<br/>Skills: NONE<br/>Tools: sessions_spawn,<br/>sessions_yield, read"]
-    
     Classifier -->|reads once per turn| SkillsJson["SKILLS.json dispatch table"]
-    Classifier -->|sessions_spawn| BrowserAgent["browser-agent<br/>gpt-5.4<br/>Skills: browser-automation,<br/>passimagein<br/>Tools: browser, exec,<br/>read, write"]
-    Classifier -->|sessions_spawn| CrawlnodeAgent["crawlnode-agent<br/>gpt-5.4<br/>Skills: crawlnode,<br/>passimagein<br/>Tools: exec, read, write"]
-    
+    Classifier -->|sessions_spawn| BrowserAgent["browser-agent<br/>gpt-5.4<br/>Skills: browser-automation, PassImageIn<br/>Tools: browser, exec, read, write"]
+    Classifier -->|sessions_spawn| CrawlnodeAgent["crawlnode-agent<br/>gpt-5.4<br/>Skills: crawlnode, PassImageIn<br/>Tools: exec, read, write"]
+
     BrowserAgent -.->|announce with result| Classifier
     CrawlnodeAgent -.->|announce with result| Classifier
-    
+
     Classifier -->|final synthesized text| Asa
 ```
 
-**Strength in one sentence:** the classifier picks the right specialist and forwards the reply, but has no way to do the work itself; the specialist does the work with a narrow skill set it can actually hold in its head.
-
-## 4) Component responsibilities
+## 3) Component responsibilities
 
 | Component | Where it lives | Job |
 |---|---|---|
-| **`main` classifier agent** | `~/.openclaw/workspace/AGENTS.md` on each Claw | ONE job: read `SKILLS.json`, pick specialist, `sessions_spawn` it, `sessions_yield`, synthesize the specialist's reply for Asa. Physically cannot run browser, exec, or write (tool allowlist restricts it). |
-| **`browser-agent` specialist** | `~/.openclaw/workspace-browser/AGENTS.md` on each Claw | Drives Chromium via the `browser` tool. Captures screenshots. Uses passimagein (as a skill, not a separate agent) to upload files via `exec curl`. Returns the public URL. Cannot spawn further agents. |
-| **`crawlnode-agent` specialist** | `~/.openclaw/workspace-crawlnode/AGENTS.md` on each Claw | Same idea but hits the CrawlNode HTTP API via `exec curl` instead of a local browser. Also uses passimagein to upload results. Cannot spawn further agents. |
-| **`SKILLS.json`** | Root of [openclaw-skill.crawlnode.com](https://github.com/linkgrid/openclaw-skill.crawlnode.com) | The dispatch table the classifier reads at the start of every turn. Lists each skill's capabilities and its `collaborates_with` chain. Source of truth for what specialists exist. |
-| **Per-skill `SKILL.md` files** | Skills repo (`browser-automation/`, `crawlnode/`, `passimagein/`) | The actual instructions each specialist reads. Filtered per-agent by `agents.entries.*.skills` config — the classifier can't see them at all; each specialist sees only its assigned ones. |
-| **Per-agent `AGENTS.md` files** | Skills repo, new `agents/` folder (`agents/main/`, `agents/browser-agent/`, `agents/crawlnode-agent/`) | The system prompt for each agent. Auto-loaded by OpenClaw at session start. Deployed by the refresh script into the corresponding workspace folder on each Claw. |
-| **`openclaw-config/multi-agent-overlay.json5`** | Skills repo, new `openclaw-config/` folder | The `agents.entries` config chunk merged into `~/.openclaw/openclaw.json` by the refresh script. Defines which agents exist, which model each uses, which skills each sees, which tools each is allowed. |
-| **`~/scripts/refresh-openclaw.sh`** | Each Claw filesystem | Extended in this refactor to also sync `agents/*/AGENTS.md` and the config overlay, and to call `openclaw agents add` for any specialist that doesn't yet exist. Idempotent — safe to re-run. |
+| **`main` classifier agent** | `~/.openclaw/workspace/AGENTS.md` on each Claw | Read `SKILLS.json`, pick specialist, `sessions_spawn` it, `sessions_yield`, forward the specialist's reply. |
+| **`browser-agent` specialist** | `~/.openclaw/workspace-browser/AGENTS.md` | Drives Chromium via `browser`. Captures screenshots. Uploads via the helper script (see section 6). |
+| **`crawlnode-agent` specialist** | `~/.openclaw/workspace-crawlnode/AGENTS.md` | Hits the CrawlNode HTTP API via `exec curl`. Uploads results via passimagein. |
+| **`SKILLS.json`** | Root of this repo | Dispatch table the classifier reads. Source of truth for what specialists exist. |
+| **`SKILL.md` files** | `browser-automation/`, `crawlnode/`, `passimagein/` | Per-skill instructions filtered per-agent via the overlay. |
+| **`AGENTS.md` files** | `agents/main/`, `agents/browser-agent/`, `agents/crawlnode-agent/` | System prompts. Each folder also has a one-line `WORKSPACE` file pointing at the target directory on the Claw. |
+| **`multi-agent-overlay.json5`** | `openclaw-config/` | Config chunk merged into `~/.openclaw/openclaw.json` via `openclaw config patch`. Defines agents.list[], per-agent tools/skills/model, ACP defaults. |
+| **`upload-latest-screenshot.sh`** | `openclaw-config/scripts/` | Helper script `browser-agent` calls to upload the newest screenshot. Exists because of a real gotcha — see section 6. |
+| **`refresh-openclaw.sh`** | `openclaw-config/scripts/` + installed to `~/scripts/` on each Claw | The one-command deploy. See section 8. |
 
-## 5) Data flow for a screenshot request
+## 4) Intended data flow (a screenshot request)
 
 ```mermaid
 sequenceDiagram
@@ -98,81 +81,155 @@ sequenceDiagram
     participant U as User in Slack
     participant A as Asa Worker
     participant C as main classifier
-    participant B as browser-agent specialist
-    participant P as Passimage HTTPS API
-    
-    U->>A: Claw1: screenshot example.com
+    participant B as browser-agent
+    participant P as Passimage
+
+    U->>A: Claw2: screenshot example.com
     A->>C: chat.send via WebSocket
     C->>C: read SKILLS.json
     C->>B: sessions_spawn "screenshot example.com"
-    C->>C: sessions_yield until child completes
-    B->>B: read browser-automation SKILL.md
-    B->>B: browser: open example.com
-    B->>B: browser: screenshot
-    B->>P: exec: curl POST upload
-    P-->>B: return public URL
+    C->>C: sessions_yield
+    Note over A,C: [BUG] Asa closes the stream here today
+    B->>B: browser: navigate + screenshot (ONCE)
+    B->>B: exec ~/.openclaw/scripts/upload-latest-screenshot.sh
+    B->>P: curl upload
+    P-->>B: public URL
     B-->>C: announce with URL
-    C->>A: final assistant text with URL
-    A->>U: reply in Slack thread
+    C->>A: final text with URL
+    A->>U: reply in Slack
 ```
 
-Total wall-clock: about 25-30 seconds end to end (about 2-4 seconds slower than today because of the extra classifier turn and hand-off).
+Steps 1–5 and 7–12 work when run from the OpenClaw CLI directly on Claw2. Steps 6–12 do NOT complete via the Slack/Asa path today.
 
-## 6) Cost estimate
+## 5) OpenClaw config quirks we hit (write these down)
 
-| Component per request | Approximate cost |
+These are **not** in OpenClaw's public docs. All discovered by trial + gateway-log spelunking on Aug 24 2026 against OpenClaw `2026.6.34`.
+
+### 5.1 Schema is `agents.list[]`, not `agents.entries.{}`
+
+The docs on `docs.openclaw.ai/tools/skills-config` show `agents.entries.<id> = {...}` (an object keyed by agent id). The actual runtime schema (per `openclaw config schema`) is `agents.list = [ {id, ...}, ... ]` (an array). The `openclaw config patch` command RE­PLACES arrays wholesale, so the overlay's `list` is the full source of truth for what agents exist.
+
+### 5.2 Tool inheritance: subagents inherit the parent's tool allowlist
+
+When `main` calls `sessions_spawn` for `browser-agent`, the spawned session inherits `main`'s **effective tool allowlist**. If `main.tools.allow` only lists `sessions_spawn`/`sessions_yield`/`read`, the subagent literally cannot see the `browser` tool — regardless of what `browser-agent.tools.alsoAllow` says.
+
+**Workaround (currently applied):** `main.tools.allow` includes `browser`, `exec`, `write` so the subagent inherits them. `main`'s AGENTS.md prompt is very explicit: "You never do the work yourself. Never call browser/exec/write." Policy is enforced by prompt; config just widens the inherited set.
+
+### 5.3 Model resolution for subagents
+
+Setting `browser-agent.model = openrouter/openai/gpt-5.4` alone does NOT force spawned children to use that model — the parent's `sessions_spawn` call passes an explicit `model` argument that overrides. So the classifier can (and sometimes does) pass whatever model it wants.
+
+**Workaround (currently applied):** `main.subagents.model = openrouter/openai/gpt-5.4` sits as a default. In practice we've seen `main` still pass whatever it feels like in the `sessions_spawn` arguments. Not fully solved — needs a prompt change in `agents/main/AGENTS.md` telling `main` to omit the `model` field.
+
+### 5.4 The `browser: screenshot` tool doesn't return the file path
+
+Since `2026.6.x`, `browser: screenshot` saves the PNG to `~/.openclaw/media/browser/<uuid>.png` but returns to the LLM only the **vision-model description** of what the image contains. The file path is stripped. Any AGENTS.md prompt telling the model "grab `details.path` and upload it" will loop forever — the model retries the screenshot hoping to see the path.
+
+**Workaround (currently applied):** `browser-agent/AGENTS.md` has HARD RULE #8 ("never call screenshot more than once") and points the agent at `~/.openclaw/scripts/upload-latest-screenshot.sh`, which finds the newest PNG with `ls -t` and uploads it in one command. Section 6 describes this.
+
+## 6) The helper-script pattern (`upload-latest-screenshot.sh`)
+
+To sidestep quirk 5.4 without depending on which LLM the specialist is running as, every non-trivial "produce a file → upload it" step is packaged as a shell script the agent calls via `exec`. The script:
+
+- Finds the newest PNG in `~/.openclaw/media/browser/`.
+- Reads `PASSIMAGE_FILES_API_KEY` from the gateway's env (loaded from `~/.openclaw/.env` by systemd).
+- Uploads via `curl` and prints the resulting public URL on stdout.
+- Prints `ERROR: <reason>` to stderr and exits non-zero if anything fails.
+
+**Why a script instead of inline `exec`:** small models like `gpt-5.6-luna` sometimes truncate long env-var names into ellipses (we observed `$PASSI…_KEY` in the trajectory logs). A script name is a short, hard-to-mangle string. Same reasoning for any future "make a thing → share the thing" helper.
+
+## 7) Repo layout
+
+```
+openclaw-skills/                           (this repo)
+├── DESIGN.md                              this file
+├── README.md                              plain-English intro
+├── SKILLS.json                            classifier's dispatch table
+├── browser-automation/SKILL.md            unchanged skill (loaded into browser-agent)
+├── crawlnode/                             unchanged skill (loaded into crawlnode-agent)
+│   ├── SKILL.md
+│   ├── docs/CRAWLNODE-API-DOCUMENTATION.md
+│   └── scripts/test-crawlnode.sh
+├── passimagein/SKILL.md                   unchanged (loaded into every specialist)
+├── agents/                                per-agent prompts (new Aug 24 2026)
+│   ├── main/
+│   │   ├── AGENTS.md                      classifier prompt
+│   │   └── WORKSPACE                      "$HOME/.openclaw/workspace"
+│   ├── browser-agent/
+│   │   ├── AGENTS.md                      browser specialist prompt
+│   │   └── WORKSPACE                      "$HOME/.openclaw/workspace-browser"
+│   └── crawlnode-agent/
+│       ├── AGENTS.md                      crawlnode specialist prompt
+│       └── WORKSPACE                      "$HOME/.openclaw/workspace-crawlnode"
+└── openclaw-config/                       config + deploy (new Aug 24 2026)
+    ├── multi-agent-overlay.json5          config chunk applied via `openclaw config patch`
+    └── scripts/
+        ├── refresh-openclaw.sh            the one-command deploy
+        └── upload-latest-screenshot.sh    passimage helper called by browser-agent via exec
+```
+
+## 8) Deploy mechanism (`refresh-openclaw.sh`)
+
+Run on each Claw as: `~/scripts/refresh-openclaw.sh`. Steps in order:
+
+1. `git clone --depth 1` this repo into `/tmp/openclaw-skills-pull`.
+2. Sync top-level skill folders (`browser-automation/`, `crawlnode/`, `passimagein/`) into `~/.openclaw/skills/`. Copy `SKILLS.json`.
+3. For each `agents/<name>/AGENTS.md`, copy it to the path in that folder's `WORKSPACE` file. Timestamped backup of the previous version if it differed.
+4. Copy every `openclaw-config/scripts/*.sh` (except `refresh-openclaw.sh` itself) into `~/.openclaw/scripts/`, `chmod +x`.
+5. Run `openclaw config patch --file openclaw-config/multi-agent-overlay.json5` — dry-run first, then apply. Output logged to `/tmp/openclaw-refresh-overlay.log`.
+6. Self-update: copy the repo's `refresh-openclaw.sh` over `~/scripts/refresh-openclaw.sh` so future runs use the freshest version.
+7. Restart the OpenClaw gateway via `systemctl --user`.
+
+Idempotent, safe to re-run. Exits non-zero on the first failure.
+
+**Practical note discovered Aug 24:** when invoked through certain non-interactive SSH wrappers (like a plain `ssh user@host '~/scripts/refresh-openclaw.sh'`), the openclaw CLI subprocess sometimes gets SIGKILL'd mid-run. Run it in an interactive SSH session (`ssh -t`) or detached (`nohup ... < /dev/null &`) to avoid this. Direct invocation on the machine itself works fine.
+
+## 9) Cost estimate
+
+| Component per request | Cost |
 |---|---|
 | Classifier turn (`gpt-5.6-luna`, ~1000 in / 200 out tokens) | ~$0.001 |
-| Specialist turn (`gpt-5.4`, roughly today's whole-run cost) | ~$0.05 |
-| **Total** | **~$0.051 (about 2% more than today)** |
+| Specialist turn (`gpt-5.4`) | ~$0.05 |
+| **Total** | **~$0.051** (about 2% more than the pre-refactor single-agent flow) |
 
-Negligible in practice.
+## 10) Non-goals
 
-## 7) Risks and mitigations
+- **No changes to Asa's runtime code required by design.** In practice we made two small Asa-side patches to handle OpenClaw 2026.6.34's newer wire protocol and its `sessions_yield` behaviour — see section 11 and the Asa repo's commit history.
+- **No use of OpenClaw channel bindings for content-based routing.** The classifier prompt does that instead.
+- **No nested sub-agents (`maxSpawnDepth: 1`).** Specialists cannot spawn further.
+- **No separate `passimagein-agent`.** Passimage is loaded into every specialist as a shared skill.
 
-| What could go wrong | Why it's a worry | How we prevent it |
-|---|---|---|
-| Classifier tries to answer directly instead of calling the specialist | The AI is lazy sometimes. It might invent a fake screenshot URL to save time. | Restrict its tools to `sessions_spawn`, `sessions_yield`, `read`, `agents_list` only. It physically cannot open a browser or run commands, so it must delegate. |
-| Sub-agent spawning doesn't work end to end when the request comes from Slack | Slack messages route through a "channel adapter." Some OpenClaw tools have quirks in that path. We haven't proven `sessions_spawn` works there yet. | Phase 0 of the implementation plan is a 15-minute recon on Claw1 that tests exactly this before we build anything. If it fails, we stop and re-plan. |
-| Claw1 and Claw2 drift apart on skill/agent versions | If we only update one machine, one Claw behaves one way and the other differently. Debugging nightmare. | Both Claws run the same refresh script that pulls the same commit from this repo. Verified after each deploy with `openclaw skills check --agent browser-agent`. |
-| Something breaks mid-deploy on one Claw | The Claw is unusable until we fix it. | Every phase saves a timestamped backup of what it changes (`openclaw.json.bak.pre-multi-agent-*`, `refresh-openclaw.sh.bak.pre-multi-agent-*`). Rollback = restore the backup. |
-| Existing conversation history disappears | The `main` agent has months of session data in its SQLite store. | We don't delete `main` — we change its config and its workspace `AGENTS.md`. All the session data stays intact. |
-| Classifier picks the wrong specialist | E.g. routes a screenshot request to `crawlnode-agent` when the user wanted the local browser. | The `main/AGENTS.md` prompt has explicit routing rules ("if user says `crawlnode` → crawlnode-agent, else → browser-agent"). And Phase 5 tests both paths three times each. |
+## 11) Known issues (Aug 24 2026)
 
-## 8) Whole-system rollback
+### 11.1 Slack path still returns `_No response._`
 
-Per Claw, in order:
+CLI tests on Claw2 work end-to-end (`~/.npm-global/bin/openclaw agent --agent main -m 'take a screenshot of https://example.com'` returns a valid Passimage URL). Slack tests do NOT — the Asa worker terminates the run after `sessions_yield` and before `browser-agent` produces any output.
 
-1. `mv ~/.openclaw/openclaw.json.bak.pre-multi-agent-<timestamp> ~/.openclaw/openclaw.json`
-2. `mv ~/scripts/refresh-openclaw.sh.bak.pre-multi-agent-<date> ~/scripts/refresh-openclaw.sh`
-3. `openclaw agents delete browser-agent --force`
-4. `openclaw agents delete crawlnode-agent --force`
-5. `cp ~/.openclaw/workspace/AGENTS.md.bak.pre-multi-agent-<timestamp> ~/.openclaw/workspace/AGENTS.md`
-6. `systemctl --user restart openclaw-gateway`
+**Fixes shipped in the Asa Cloudflare Worker so far (commits on `main`):**
 
-Zero changes in Asa's code, so Asa needs no rollback.
+- `1e095fa fix(openclaw): accept gateway protocol v3 OR v4 during connect` — needed after Claw2 upgraded from 2026.4.2 to 2026.6.34.
+- `fcb4831 fix(openclaw): keep listening after sessions_yield in multi-agent runs` — first attempt at suppression, only caught `stopReason=lifecycle_end`.
+- `99b8e2f fix(openclaw): suppress every premature terminal after sessions_yield` — counter-based suppression for `end_turn` / `stop` / `length` / `content_filter` / `lifecycle_end` / `chat_aborted`.
 
-## 9) Non-goals and future work
+**Symptom after those fixes deployed:** Slack still shows main's tool calls (`read` → `sessions_spawn` → `sessions_yield`) then a blank line, `View full thread`, then `_No response._`. The subagent apparently never starts (nothing in `~/.openclaw/agents/browser-agent/sessions/` newer than the last CLI test).
 
-### Explicit non-goals for this refactor
+**Suspected areas to investigate next:**
 
-- **No changes to Asa's runtime code.** Asa remains a dumb middleman. All routing and orchestration is on the OpenClaw side.
-- **No use of OpenClaw channel bindings for content-based routing.** Bindings key on `(channel, account, peer)` — the wrong tool for our job of "look at the message content and pick a specialist." Classifier prompt does that instead.
-- **No nested sub-agents (`maxSpawnDepth: 1`).** Specialists cannot spawn their own sub-agents. Simpler to reason about, no risk of runaway loops. We can raise this to 2 later if a real use case appears (e.g. an orchestrator specialist that fans out to workers).
-- **No separate `passimagein-agent`.** Passimage is a helper skill (uploads a file, returns URL) that on its own has nothing to do. It's loaded into `browser-agent` and `crawlnode-agent` as a shared library. Any future agent that produces files will also load it.
+- The `sessions_spawn` from Slack passes `"model": "openrouter/openai/gpt-5.6-luna"` explicitly. The CLI-successful runs passed `openrouter/openai/gpt-5.4`. Model routing may be silently rejecting the spawn.
+- The overlay's `main.subagents.model` may not be enforced when the classifier passes an explicit `model` in `sessions_spawn` args.
+- Asa may still be counting suppressions incorrectly. The new counter increments on `sessions_yield` only, not `sessions_spawn`. If the gateway emits a `chat_final` between the `sessions_spawn` tool_call_end and the `sessions_yield` tool_call_start, the counter wouldn't catch it.
+- Cloudflare Worker CPU/subrequest budgets may be closing the WebSocket. Check the Worker's real-time logs during the failing request.
 
-### Deferred to a future phase (planned, not built yet)
+### 11.2 Two orthogonal quirks documented above (5.2, 5.3, 5.4)
 
-- **`calendar-schedule` skill + `calendar-agent` specialist.** Google Calendar create/update/cancel/list via the existing service account with domain-wide delegation (credentials already exist in Asa's env). Deferred until the three-agent classifier is proven stable in production. When added, follows the exact same pattern: new folder in this repo, new AGENTS.md, one new entry in the multi-agent-overlay.json5, refresh script picks it up.
-- **Other specialist agents as needed.** Any future workflow (Slack summaries, PDF generation, chart rendering, email drafting, etc.) can be added as a new specialist without touching the classifier or existing specialists. The classifier just gets a new row in `SKILLS.json` and a new "if user asks X, spawn Y" rule in its `AGENTS.md`.
+Section 5 describes them. Any future skill/agent work should read that section first.
 
-## 10) Related documents
+## 12) Related documents
 
-- **Implementation plan (phase-by-phase, with rollback per phase):** `docs/OPENCLAW_MULTI_AGENT_PLAN.md` in the [Asa repo](https://github.com/linkgrid/asa-cf-worker.autoscale.team/blob/main/docs/OPENCLAW_MULTI_AGENT_PLAN.md).
-- **Overall OpenClaw operating context (Slack integration, admin panel, day-to-day operations):** `docs/OPENCLAW_WORKING_CONTEXT.md` in the Asa repo.
-- **Skills repo README (the aspirational architecture picture this design finally realizes):** [README.md](README.md).
-- **OpenClaw upstream docs used to inform this design:**
-  - Multi-agent routing: `https://docs.openclaw.ai/concepts/multi-agent`
-  - Sub-agents (`sessions_spawn` / `sessions_yield`): `https://docs.openclaw.ai/tools/subagents`
-  - Agent workspace + AGENTS.md: `https://docs.openclaw.ai/concepts/agent-workspace`
-  - Skills config (per-agent visibility): `https://docs.openclaw.ai/tools/skills-config`
+- [asa-cf-worker.autoscale.team](https://github.com/linkgrid/asa-cf-worker.autoscale.team) — the Slack-facing side.
+- `docs/OPENCLAW_WORKING_CONTEXT.md` in the Asa repo — day-to-day OpenClaw operations reference.
+- OpenClaw upstream docs (used to inform this design, but see section 5 for where they disagree with reality):
+  - `https://docs.openclaw.ai/concepts/multi-agent`
+  - `https://docs.openclaw.ai/tools/subagents`
+  - `https://docs.openclaw.ai/concepts/agent-workspace`
+  - `https://docs.openclaw.ai/tools/skills-config`
