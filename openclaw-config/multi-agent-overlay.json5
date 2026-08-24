@@ -1,0 +1,190 @@
+// multi-agent-overlay.json5
+//
+// Partial OpenClaw config overlay. On each Claw, the refresh script
+// (Phase 2 of the plan) applies this via `openclaw config patch --file`,
+// which recursively merges objects and REPLACES arrays. That means:
+//   - agents.defaults.subagents.* → merged
+//   - agents.list                 → replaced wholesale (we are the source of truth)
+//   - acp.defaultAgent            → overwritten
+// Every other key in openclaw.json (models, secrets, gateway, browser,
+// hooks, tools.*) is untouched.
+//
+// Schema reference: `openclaw config schema` on the target Claw. Verified
+// against OpenClaw 2026.6.34 on Aug 24, 2026.
+//
+// See docs/OPENCLAW_MULTI_AGENT_DESIGN.md + docs/OPENCLAW_MULTI_AGENT_PLAN.md
+// in the asa-cf-worker.autoscale.team repo for the full architecture.
+{
+  agents: {
+    defaults: {
+      // Shared sub-agent lifecycle defaults. Every entry in `agents.list`
+      // inherits these unless it defines its own `subagents` block.
+      subagents: {
+        // Only `main` should spawn; specialists cannot spawn further.
+        // Prevents runaway fan-out.
+        maxSpawnDepth: 1,
+
+        // A single classifier turn shouldn't need more than 5 specialists.
+        // If we ever hit this, main is looping — investigate.
+        maxChildrenPerAgent: 5,
+
+        // Total concurrent spawns across all sessions on this Claw.
+        maxConcurrent: 8,
+
+        // 3 minutes covers browser open + screenshot + Passimage upload.
+        runTimeoutSeconds: 180,
+
+        // Which agents `main` is allowed to spawn. "*" = any registered.
+        // Specialists have maxSpawnDepth: 1 above, so they can't spawn
+        // regardless of what this allows.
+        allowAgents: ["*"],
+
+        // Require callers to always pass an explicit agentId (no fallback
+        // guessing). Combined with our AGENTS.md prompt for main which
+        // spells out the routing rules, this eliminates ambiguous spawns.
+        requireAgentId: true,
+      },
+    },
+
+    // Authoritative list of agents on this Claw. `config patch` REPLACES
+    // this whole array — do not leave things out expecting the CLI's
+    // previous entries to merge in.
+    list: [
+      {
+        id: "main",
+        default: true,
+        name: "main",
+        workspace: "~/.openclaw/workspace",
+
+        // Cheap classifier model. Per-run cost ~$0.001 on OpenRouter.
+        model: "openrouter/openai/gpt-5.6-luna",
+
+        // Empty allowlist = classifier sees ZERO skills. It cannot read
+        // or execute them even if it tried.
+        skills: [],
+
+        // Tool allowlist for main.
+        //
+        // IMPORTANT — subagent inheritance quirk (discovered Aug 24 2026):
+        // When main spawns a subagent via sessions_spawn, the subagent
+        // INHERITS main's effective tool allowlist. If main's list is
+        // super tight (e.g. only sessions_spawn/yield/read/agents_list),
+        // the subagent CANNOT see browser/exec/write no matter what its
+        // own tools.alsoAllow says. There's no runtime flag to reset
+        // inheritance in OpenClaw 2026.6.34.
+        //
+        // Workaround: include browser + exec + write in main's allowlist
+        // so subagents inherit them. Main is prevented from actually
+        // calling them by its AGENTS.md prompt (which is very explicit:
+        // "You never do the work yourself"). This is a policy-vs-config
+        // trade-off: we rely on the classifier prompt for the "don't touch
+        // browser" rule and use config only to widen the inherited set.
+        tools: {
+          allow: [
+            "sessions_spawn",
+            "sessions_yield",
+            "read",
+            "agents_list",
+            "browser",
+            "exec",
+            "write",
+            "wait",
+          ],
+        },
+
+        // Sub-agent policy for children spawned by `main`.
+        //
+        // IMPORTANT — model inheritance quirk (discovered Aug 24 2026):
+        // When main spawns a subagent, the subagent's own `model` field
+        // (browser-agent.model, crawlnode-agent.model) is IGNORED. The
+        // gateway resolves the subagent's model from:
+        //   1. main.subagents.model                (highest priority — set below)
+        //   2. agents.defaults.subagents.model     (fallback if unset)
+        //   3. main.model                          (last resort — WRONG: uses classifier model)
+        //
+        // Without setting subagents.model here, both browser-agent and
+        // crawlnode-agent inherit main's cheap classifier model
+        // (gpt-5.6-luna). That model then hallucinates env-var names
+        // (e.g. "$PASSI…_KEY" instead of "$PASSIMAGE_FILES_API_KEY"),
+        // causing curl uploads to fail silently and the LLM to invent
+        // a plausible-but-fake Passimage URL.
+        //
+        // Fix: force all children spawned by `main` to run on gpt-5.4,
+        // which is a smart enough model to preserve full env-var names
+        // and follow the multi-step exec workflow correctly. If we ever
+        // need per-specialist model tuning, we'll add a more granular
+        // routing layer above.
+        subagents: {
+          model: "openrouter/openai/gpt-5.4",
+        },
+      },
+
+      {
+        id: "browser-agent",
+        name: "browser-agent",
+        workspace: "~/.openclaw/workspace-browser",
+        model: "openrouter/openai/gpt-5.4",
+        // NOTE: "PassImageIn" is case-sensitive — that's the actual skill
+        // name in ~/.openclaw/skills/. Lowercase "passimagein" silently
+        // gets filtered out.
+        skills: ["browser-automation", "PassImageIn"],
+
+        // Tool policy for browser-agent.
+        //
+        // The schema is: agents.list[].tools = { profile, allow, alsoAllow,
+        // deny, sandbox: { tools: { allow, alsoAllow, deny } } }
+        //
+        // - profile: "full" — start from the widest baseline instead of
+        //   the default (which for subagents ends up as a minimal set:
+        //   basically only `read` and `wait`).
+        // - alsoAllow: add browser + exec + write on top of the profile.
+        // - sandbox.tools.alsoAllow: SAME tools again, but scoped to the
+        //   subagent runtime that kicks in when `main` spawns this agent
+        //   via sessions_spawn. Without this, the subagent literally
+        //   cannot see the `browser` tool and returns "browser tool not
+        //   available" — that's what burnt us on the first live end-to-end
+        //   test (Aug 24 2026).
+        tools: {
+          profile: "full",
+          alsoAllow: ["browser", "exec", "write"],
+          sandbox: {
+            tools: {
+              alsoAllow: ["browser", "exec", "write", "read", "wait"],
+            },
+          },
+        },
+      },
+
+      {
+        id: "crawlnode-agent",
+        name: "crawlnode-agent",
+        workspace: "~/.openclaw/workspace-crawlnode",
+        model: "openrouter/openai/gpt-5.4",
+        skills: ["crawlnode", "PassImageIn"],
+
+        // Crawlnode-agent needs `exec` for both the CrawlNode API curl
+        // and the passimage.in upload curl. It does NOT need `browser`
+        // (CrawlNode IS the remote browser).
+        tools: {
+          profile: "full",
+          alsoAllow: ["exec", "write"],
+          sandbox: {
+            tools: {
+              alsoAllow: ["exec", "write", "read", "wait"],
+            },
+          },
+        },
+      },
+    ],
+  },
+
+  // ACP (Agent Control Protocol) runtime knobs.
+  acp: {
+    // Fallback spawn target if main ever calls sessions_spawn without
+    // an explicit agentId. Because we set agents.defaults.subagents.
+    // requireAgentId=true above, this fallback should never trigger —
+    // but we set it anyway so the failure mode is "runs on browser-agent"
+    // instead of "gateway 500 error".
+    defaultAgent: "browser-agent",
+  },
+}
