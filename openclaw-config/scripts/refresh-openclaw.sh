@@ -128,15 +128,23 @@ echo
 # So the overlay is the source of truth for agents.list[], acp.defaultAgent,
 # and agents.defaults.subagents — nothing else in openclaw.json is touched.
 echo "[5/7] Applying multi-agent config overlay..."
+# We redirect openclaw's very chatty stderr to a log file rather than piping it
+# through `tail`. Under ssh + shell wrappers, the pipeline sometimes gets OOM-
+# killed (SIGKILL / exit 137) because the whole subshell has to buffer the
+# stream. Log-file redirection sidesteps that entirely.
 OVERLAY="$CLONE_DIR/openclaw-config/multi-agent-overlay.json5"
+OVERLAY_LOG="/tmp/openclaw-refresh-overlay.log"
 if [ -f "$OVERLAY" ]; then
   # Dry-run first so we fail loud without touching live config.
-  if $OC config patch --file "$OVERLAY" --dry-run >/dev/null 2>&1; then
-    $OC config patch --file "$OVERLAY" 2>&1 | tail -1
-    echo "  -> Applied overlay from $OVERLAY"
+  if $OC config patch --file "$OVERLAY" --dry-run >"$OVERLAY_LOG" 2>&1; then
+    if $OC config patch --file "$OVERLAY" >>"$OVERLAY_LOG" 2>&1; then
+      echo "  -> Applied overlay from $OVERLAY (log: $OVERLAY_LOG)"
+    else
+      echo "  -> ERROR: overlay apply failed. See $OVERLAY_LOG" >&2
+      exit 1
+    fi
   else
-    echo "  -> ERROR: overlay failed dry-run validation. Skipping apply." >&2
-    $OC config patch --file "$OVERLAY" --dry-run 2>&1 | tail -20 >&2
+    echo "  -> ERROR: overlay failed dry-run validation. See $OVERLAY_LOG" >&2
     exit 1
   fi
 else
