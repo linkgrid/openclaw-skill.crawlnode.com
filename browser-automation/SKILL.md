@@ -129,17 +129,40 @@ Replace the path with the actual `details.path` from your screenshot result. If 
 
 Include the returned URL in your reply to the user.
 
-### 5. Extract text (when needed)
+### 5. Extract text and links (when needed)
+
+**There is no `extract_text` action, and `evaluate` cannot take a CSS `selector`.** Get page content from `snapshot` instead. To read links (search results, listings, navigation), set `urls: true` — the snapshot then ends with a numbered `Links:` section containing the real hrefs:
 
 ```json
-{ "tool": "browser", "action": "extract_text", "params": { "selector": "div.results" } }
+{
+  "tool": "browser",
+  "action": "snapshot",
+  "params": {
+    "targetId": "<from navigate>",
+    "mode": "efficient",
+    "snapshotFormat": "ai",
+    "urls": true,
+    "compact": true,
+    "limit": 100,
+    "maxChars": 30000
+  }
+}
 ```
 
-Or use JavaScript evaluation for structured data:
+If the output is cut off before you find what you need, raise `maxChars` and re-snapshot. Do NOT switch to `evaluate` because the snapshot was truncated — truncation is a size problem, not a tool problem.
 
-```json
-{ "tool": "browser", "action": "evaluate", "params": { "script": "() => document.title" } }
-```
+For a search-results page, the `Links:` list mixes navigation links (the search engine's own menu, filters, "Images", "Videos") with actual results. Skip links pointing back at the search engine's own domain; the results are the ones pointing at third-party sites.
+
+### Parameter combinations the tool rejects
+
+These fail with a validation error, not because the browser is broken. Getting one back means fix the parameter and retry:
+
+| Error | Cause | Fix |
+| --- | --- | --- |
+| `'selector' is not supported. Use 'ref' from snapshot instead.` | Passed a CSS `selector` (often inside `evaluate`) | Use `snapshot` to read content, or a `ref` to interact |
+| `labels/mode=efficient require format=ai` | `labels: true` or `mode: "efficient"` combined with `snapshotFormat: "aria"` | Set `snapshotFormat: "ai"` |
+
+Rule of thumb: with `mode: "efficient"`, always use `snapshotFormat: "ai"`.
 
 ## Interaction rules (mandatory)
 
@@ -172,7 +195,7 @@ If the element you need is not in the snapshot:
 
 1. **Scroll down** — use `press` with `PageDown` key, then re-snapshot.
 2. **Wait longer** — some elements load after JavaScript runs. Wait 3-5 seconds, then re-snapshot.
-3. **Try evaluate** — use JavaScript to check if the element exists in the DOM: `() => !!document.querySelector('input[name="vin"]')`.
+3. **Re-snapshot with more detail** — raise `depth`, `limit`, and `maxChars`, and set `urls: true`. Elements are often present but trimmed out of a shallow snapshot. Do not reach for `evaluate` with a CSS selector; the tool rejects `selector`.
 
 ## Scrolling
 
