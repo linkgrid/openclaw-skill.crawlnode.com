@@ -234,9 +234,15 @@ echo
 # ---------------------------------------------------------------------------
 # [7/8] Self-update this refresh script
 # ---------------------------------------------------------------------------
-# Copy the freshest version of this file over ~/scripts/refresh-openclaw.sh
-# so future runs automatically pick up any changes committed to the repo.
-# Safe while running: Linux keeps the currently-executing file open.
+# Replace ~/scripts/refresh-openclaw.sh with the freshest version from the repo
+# so future runs automatically pick up any changes committed there.
+#
+# MUST use mv, never cp. bash reads a script incrementally and remembers a byte
+# offset into the file it is executing. `cp` rewrites the SAME inode in place,
+# so the running shell resumes at its old offset inside the NEW bytes — if the
+# new version differs in length, bash lands mid-token and dies with a syntax
+# error before reaching step [8]. `mv` is an atomic rename that installs a new
+# inode; the running script keeps reading its original one via its open handle.
 echo "[7/8] Self-updating refresh script..."
 NEW_SELF="$CLONE_DIR/openclaw-config/scripts/refresh-openclaw.sh"
 SELF_TARGET="$OP_SCRIPTS_DIR/refresh-openclaw.sh"
@@ -244,8 +250,10 @@ mkdir -p "$OP_SCRIPTS_DIR"
 if [ -f "$NEW_SELF" ]; then
   if [ ! -f "$SELF_TARGET" ] || ! cmp -s "$NEW_SELF" "$SELF_TARGET"; then
     [ -f "$SELF_TARGET" ] && cp "$SELF_TARGET" "$SELF_TARGET.bak-$(date +%Y%m%d-%H%M%S)"
-    cp "$NEW_SELF" "$SELF_TARGET"
-    chmod +x "$SELF_TARGET"
+    SELF_TMP="$SELF_TARGET.new-$$"
+    cp "$NEW_SELF" "$SELF_TMP"
+    chmod +x "$SELF_TMP"
+    mv -f "$SELF_TMP" "$SELF_TARGET"
     echo "  -> Updated $SELF_TARGET (next run uses new version)"
   else
     echo "  -> Already up to date"
