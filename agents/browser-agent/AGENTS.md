@@ -25,21 +25,21 @@ These rules exist because Asa (this deployment) is a shared, stateless Slack bot
 
 5. **One retry maximum per browser action, only for genuinely transient errors** (stale element ref after a page mutation, or network timeout on `navigate`). Errors like "profile in use," "timed out," "Chrome CDP failed to start," or anything mentioning a lock file are NOT transient — apply rule 3 immediately.
 
-6. **A screenshot without a Passimage URL is a failed run.** After `browser: screenshot`, you MUST use `exec` to locate the file, then `exec` again to upload it. The exact path-lookup + upload workflow is in the next section. There are NO exceptions.
+6. **A screenshot without a Passimage URL is a failed run.** After `browser: screenshot`, you MUST call `exec` with `~/.openclaw/scripts/upload-latest-screenshot.sh` to upload the file and get a public URL. Do NOT roll your own `ls` + `curl` — the helper handles both `.png` and `.jpg`, sets the right `Content-Type`, and cleans up stale files. There are NO exceptions.
 
 7. **Do not shorten the reply on the assumption that the screenshot is visible.** Slack does NOT render local `/home/autoscale/...` paths. The Passimage URL is the ONLY thing the user actually sees.
 
-8. **NEVER call `browser: screenshot` more than ONCE per run.** The screenshot returns a text description of what the page looks like, NOT the file path. If you re-call it hoping to see the path, you will loop forever. The file is ALREADY saved to disk — use `exec: ls -t` (see workflow) to find it. If your first screenshot fails, apply rule 3.
+8. **NEVER call `browser: screenshot` more than ONCE per run.** The screenshot returns a text description of what the page looks like, NOT the file path. If you re-call it hoping to see the path, you will loop forever. The file is ALREADY saved to disk — just call `~/.openclaw/scripts/upload-latest-screenshot.sh` (Step 4 below). If your first screenshot fails, apply rule 3.
 
 ## How `browser: screenshot` actually works on this machine (READ THIS)
 
 When you call `browser: screenshot`, OpenClaw:
 
-1. Saves the PNG to `/home/autoscale/.openclaw/media/browser/<random-uuid>.png`.
-2. Sends that PNG to a vision model for analysis.
+1. Saves the image to `/home/autoscale/.openclaw/media/browser/<random-uuid>.<ext>`. Extension is `.jpg` on OpenClaw 2026.6.x and `.png` on older versions. You do not need to know which — the upload helper handles both.
+2. Sends that image to a vision model for analysis.
 3. Returns to YOU (the LLM) only the vision-model description — **the file path is stripped from your view**.
 
-This means you CANNOT see where the file is. You must use `exec` to find it via `ls -t`. This is expected and correct behavior on OpenClaw 2026.6.34 — don't try to work around it.
+This means you CANNOT see where the file is. You must call the upload helper via `exec`; it finds the newest image in the media directory and uploads it. This is expected and correct behavior on OpenClaw 2026.6.34 — don't try to work around it.
 
 ## Workflow for the most common task ("take a screenshot of X")
 
@@ -67,39 +67,26 @@ Only if the page needs time to render. Skip for static pages like example.com, w
 
 You will get back a vision-model description of the page. That is EXPECTED. Do not call screenshot again.
 
-### Step 4 — Find the screenshot file with `exec`
+### Step 4 — Upload to Passimage (via helper script)
+
+Call the helper — it finds the freshest screenshot in the media folder (any format), uploads it, prints the public URL, and cleans up stale files older than 30 minutes:
 
 ```json
 {
   "tool": "exec",
   "params": {
     "host": "gateway",
-    "command": "ls -t /home/autoscale/.openclaw/media/browser/*.png 2>/dev/null | head -1"
+    "command": "~/.openclaw/scripts/upload-latest-screenshot.sh"
   }
 }
 ```
 
-The `stdout` of this exec call is the absolute path to the screenshot you just took (newest PNG in that directory). Save it as `$SCREENSHOT_PATH` for step 5.
+The `stdout` is a single line: the Passimage URL (e.g. `https://s.passimage.in/f/abc123.png`).
+If `stdout` is empty, the exit code is non-zero, or the output starts with `ERROR:` on stderr, apply rule 3.
 
-### Step 5 — Upload to Passimage with `exec` (single command)
+Do NOT write your own `ls -t` + `curl` command — the helper is the single source of truth for the upload workflow.
 
-Combine the `ls` and the `curl` in one exec call to guarantee the same file:
-
-```json
-{
-  "tool": "exec",
-  "params": {
-    "host": "gateway",
-    "command": "SCREENSHOT_PATH=$(ls -t /home/autoscale/.openclaw/media/browser/*.png 2>/dev/null | head -1); [ -z \"$SCREENSHOT_PATH\" ] && echo 'ERROR: no screenshot file found' && exit 1; curl -sS -X POST 'https://s.passimage.in/upload' -H \"X-API-Key: $PASSIMAGE_FILES_API_KEY\" -H 'Content-Type: image/png' -H \"X-Filename: $(basename $SCREENSHOT_PATH)\" --data-binary \"@$SCREENSHOT_PATH\""
-  }
-}
-```
-
-Parse the JSON response — it will have a `url` field like `https://s.passimage.in/abc123`. If the response is not JSON, contains an error, or has no `url`, apply rule 3.
-
-**Skip Step 4 in practice** — Step 5's exec does the `ls` inline. Step 4 is documented separately only so you understand what's happening.
-
-### Step 6 — Reply
+### Step 5 — Reply
 
 Reply to the user with EXACTLY this format:
 
@@ -119,7 +106,7 @@ Read `browser-automation/SKILL.md` for the full workflow (`snapshot` before ever
 3. `click` / `type` / `fill` using the refs from the freshest snapshot.
 4. Re-`snapshot` before each new interaction (refs go stale after page mutations).
 5. `screenshot` ONCE at the end.
-6. Upload to Passimage via the Step 5 exec above.
+6. Upload to Passimage via the Step 4 helper script above.
 7. Reply with the Passimage URL + a one-sentence summary of what happened.
 
 ## What NOT to do
@@ -128,5 +115,6 @@ Read `browser-automation/SKILL.md` for the full workflow (`snapshot` before ever
 - ❌ Don't `sessions_spawn` another agent. You are a leaf specialist; you do the work, you don't dispatch.
 - ❌ Don't wrap the Passimage URL in markdown link syntax (`[here](url)`) — Slack sometimes strips it. Just put the URL on its own line.
 - ❌ Don't try to fall back to a different screenshot method if `browser: screenshot` fails. Rule 3 says stop.
-- ❌ Don't call `browser: screenshot` twice in the same run. Rule 8. The file is already on disk after the first call — use `exec: ls -t` to find it.
-- ❌ Don't try to read `details.path` from the screenshot response. That field exists in the gateway's internal metadata but is NOT visible to you. Use the `exec: ls -t` pattern.
+- ❌ Don't call `browser: screenshot` twice in the same run. Rule 8. The file is already on disk after the first call — call `~/.openclaw/scripts/upload-latest-screenshot.sh` to send it.
+- ❌ Don't try to read `details.path` from the screenshot response. That field exists in the gateway's internal metadata but is NOT visible to you. Use the helper script instead.
+- ❌ Don't roll your own upload command (inline `ls -t` + `curl`, or `python`/`node` scripts that POST to Passimage). The helper script is the ONLY approved upload path — it handles `.png` and `.jpg`, sets Content-Type, and cleans up stale files.
