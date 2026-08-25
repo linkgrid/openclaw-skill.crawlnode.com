@@ -60,6 +60,13 @@ GO_RESP=$(curl -sS -X POST "$API/api/go" \
   -d '{"url":"https://randomvin.com"}')
 echo "  $GO_RESP"
 
+# /api/go returns as soon as navigation is dispatched, not when the page has
+# rendered — a screenshot taken immediately after comes back as a ~200-byte
+# blank PNG and the title reads "New tab". Give Chrome time to paint.
+RENDER_WAIT="${CRAWLNODE_RENDER_WAIT:-5}"
+echo "Waiting ${RENDER_WAIT}s for the page to render ..."
+sleep "$RENDER_WAIT"
+
 # --- 3. Get element tree ---
 echo "Calling $API/api/view (saved to: /tmp/crawlnode-view1.txt)"
 curl -sS -X POST "$API/api/view" \
@@ -82,7 +89,14 @@ if [ ! -s /tmp/crawlnode-screenshot.png ]; then
   echo "ERROR: screenshot file is empty" >&2
   exit 1
 fi
-echo "  $(wc -c < /tmp/crawlnode-screenshot.png) bytes written"
+SHOT_BYTES=$(wc -c < /tmp/crawlnode-screenshot.png)
+echo "  $SHOT_BYTES bytes written"
+# A real page render is tens of KB. Anything this small is a blank frame, which
+# would otherwise be reported as a passing test with a useless screenshot URL.
+if [ "$SHOT_BYTES" -lt 5000 ]; then
+  echo "  WARNING: only $SHOT_BYTES bytes — this is almost certainly a blank page." >&2
+  echo "  The page had not rendered yet. Retry with CRAWLNODE_RENDER_WAIT=10." >&2
+fi
 
 # --- 5. Upload screenshot via passimage ---
 SCREENSHOT_URL=$(curl -sS -X POST "https://s.passimage.in/upload" \
