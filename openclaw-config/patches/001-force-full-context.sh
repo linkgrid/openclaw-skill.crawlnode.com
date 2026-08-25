@@ -15,24 +15,58 @@
 #
 # Runs at every gateway start via ExecStartPre (see patch-guard.sh).
 # Idempotent — safe to re-run.
+#
+# Target discovery: OpenClaw ships bundled files whose names carry a build
+# hash (e.g. openclaw-tools-0r2mZn6Z.js) that CHANGES on every release. This
+# script therefore locates the file by CONTENT, not by name, and exits
+# non-zero if it cannot find it — a silent skip would let the bug return
+# unnoticed after an OpenClaw upgrade.
 
 set -e
 
-FILE="$HOME/.npm-global/lib/node_modules/openclaw/dist/openclaw-tools-0r2mZn6Z.js"
+DIST="$HOME/.npm-global/lib/node_modules/openclaw/dist"
 MARKER="PATCH forceFullContext"
 
-if [ ! -f "$FILE" ]; then
-  echo "[001-force-full-context] target file not found at $FILE — skipping" >&2
-  exit 0
+# The most distinctive vanilla line. Present only in the file we need to edit.
+ANCHOR='const lightContext = params.lightContext === true;'
+
+if [ ! -d "$DIST" ]; then
+  echo "[001-force-full-context] ERROR: OpenClaw dist directory not found at $DIST" >&2
+  exit 1
 fi
 
-COUNT=$(grep -c "$MARKER" "$FILE" 2>/dev/null || true)
-COUNT=${COUNT:-0}
+# Look for an already-patched file first, then for a vanilla one. Backups
+# (*.bak-*) are excluded so we never patch a copy instead of the live file.
+find_candidate() {
+  local needle="$1"
+  grep -l -F -- "$needle" "$DIST"/*.js 2>/dev/null | grep -v '\.bak-' | head -1 || true
+}
 
-if [ "$COUNT" = "3" ]; then
-  echo "[001-force-full-context] already applied (3/3 markers)"
-  exit 0
+FILE=$(find_candidate "$MARKER")
+
+if [ -n "$FILE" ]; then
+  COUNT=$(grep -c -F -- "$MARKER" "$FILE" 2>/dev/null || true)
+  COUNT=${COUNT:-0}
+  if [ "$COUNT" = "3" ]; then
+    echo "[001-force-full-context] already applied (3/3 markers) in $(basename "$FILE")"
+    exit 0
+  fi
+  echo "[001-force-full-context] ERROR: $(basename "$FILE") has $COUNT/3 markers — partially patched." >&2
+  echo "[001-force-full-context] Restore it from a .bak-preforcefullcontext-* backup or reinstall OpenClaw, then re-run." >&2
+  exit 1
 fi
+
+FILE=$(find_candidate "$ANCHOR")
+
+if [ -z "$FILE" ]; then
+  echo "[001-force-full-context] ERROR: no file in $DIST contains the expected code." >&2
+  echo "[001-force-full-context] Searched for: $ANCHOR" >&2
+  echo "[001-force-full-context] OpenClaw's internals likely changed in this version. This patch needs updating" >&2
+  echo "[001-force-full-context] in openclaw-skill.crawlnode.com before the gateway can be considered patched." >&2
+  exit 1
+fi
+
+echo "[001-force-full-context] target: $(basename "$FILE")"
 
 # Back up the vanilla file the first time we patch it after an OpenClaw upgrade
 BAK="$FILE.bak-preforcefullcontext-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -42,7 +76,7 @@ sed -i 's|const bootstrapContextMode = params\.lightContext ? "lightweight" : vo
 sed -i 's|const contextEnginePrepareResult = params\.lightContext && preparedSpawnContext\.mode === "isolated" ?|const contextEnginePrepareResult = /*PATCH forceFullContext*/ false \&\& preparedSpawnContext.mode === "isolated" ?|' "$FILE"
 sed -i 's|const lightContext = params\.lightContext === true;|const lightContext = /*PATCH forceFullContext*/ false;|' "$FILE"
 
-NEW_COUNT=$(grep -c "$MARKER" "$FILE" 2>/dev/null || true)
+NEW_COUNT=$(grep -c -F -- "$MARKER" "$FILE" 2>/dev/null || true)
 NEW_COUNT=${NEW_COUNT:-0}
 
 if [ "$NEW_COUNT" = "3" ]; then
