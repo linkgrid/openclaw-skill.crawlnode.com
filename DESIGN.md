@@ -176,13 +176,40 @@ Run on each Claw as: `~/scripts/refresh-openclaw.sh`. Steps in order:
 2. Sync top-level skill folders (`browser-automation/`, `crawlnode/`, `passimagein/`) into `~/.openclaw/skills/`. Copy `SKILLS.json`.
 3. For each `agents/<name>/AGENTS.md`, copy it to the path in that folder's `WORKSPACE` file. Timestamped backup of the previous version if it differed.
 4. Copy every `openclaw-config/scripts/*.sh` (except `refresh-openclaw.sh` itself) into `~/.openclaw/scripts/`, `chmod +x`.
-5. Run `openclaw config patch --file openclaw-config/multi-agent-overlay.json5` — dry-run first, then apply. Output logged to `/tmp/openclaw-refresh-overlay.log`.
-6. Self-update: copy the repo's `refresh-openclaw.sh` over `~/scripts/refresh-openclaw.sh` so future runs use the freshest version.
-7. Restart the OpenClaw gateway via `systemctl --user`.
+5. Sync `openclaw-config/patches/*.sh` into `~/.openclaw/patches/`, install the systemd drop-in `~/.config/systemd/user/openclaw-gateway.service.d/patch-guard.conf` adding `ExecStartPre=~/.openclaw/scripts/patch-guard.sh`, `daemon-reload`, and run `patch-guard.sh` immediately once. See section 8.1.
+6. Run `openclaw config patch --file openclaw-config/multi-agent-overlay.json5` — dry-run first, then apply. Output logged to `/tmp/openclaw-refresh-overlay.log`.
+7. Self-update: copy the repo's `refresh-openclaw.sh` over `~/scripts/refresh-openclaw.sh` so future runs use the freshest version.
+8. Restart the OpenClaw gateway via `systemctl --user`.
 
 Idempotent, safe to re-run. Exits non-zero on the first failure.
 
 **Practical note discovered Aug 24:** when invoked through certain non-interactive SSH wrappers (like a plain `ssh user@host '~/scripts/refresh-openclaw.sh'`), the openclaw CLI subprocess sometimes gets SIGKILL'd mid-run. Run it in an interactive SSH session (`ssh -t`) or detached (`nohup ... < /dev/null &`) to avoid this. Direct invocation on the machine itself works fine.
+
+### 8.1) Gateway patches (survive `npm update -g openclaw`)
+
+Some OpenClaw bugs can only be fixed by editing the gateway's own JavaScript source inside `~/.npm-global/lib/node_modules/openclaw/dist/`. Because those files are npm-installed, a future `npm update -g openclaw` would silently wipe any hand-edits and bring the bugs back.
+
+We solve this with a **patches folder + doormat** pattern:
+
+- **`openclaw-config/patches/NNN-name.sh`** — each patch is a small, idempotent bash script that (a) checks whether its target is already patched, (b) applies the change with `sed` (or similar) if not, (c) exits 0 either way. If application fails, the script restores from a timestamped `.bak-*` backup and exits non-zero.
+- **`openclaw-config/scripts/patch-guard.sh`** — the doormat. Walks `~/.openclaw/patches/*.sh` and executes each one. Idempotency lives inside each patch script.
+- **systemd drop-in** at `~/.config/systemd/user/openclaw-gateway.service.d/patch-guard.conf` adds `ExecStartPre=~/.openclaw/scripts/patch-guard.sh` to the gateway unit. Result: every gateway start — reboot, manual restart, or post-`npm update` — first runs the doormat, which re-applies any patches that got clobbered. No operator action required after an OpenClaw upgrade.
+
+**Current patches (Aug 24 2026):**
+
+| Patch | What it fixes |
+|---|---|
+| `001-force-full-context.sh` | Hard-codes 3 places in `openclaw-tools-*.js` so `params.lightContext` is treated as `false` regardless of what the classifier sent. Vanilla OpenClaw lets the LLM classifier decide `lightContext` per spawn, which flips run-to-run and randomly ships subagents without their AGENTS.md rulebook — the root cause of the browser-agent screenshot loop / timeout observed on Aug 24. |
+
+**Diagnostics:**
+
+- `ls ~/.openclaw/patches/` — what's installed on the Claw right now.
+- `journalctl --user -u openclaw-gateway | grep patch-guard` — the guard's last log lines (e.g. `[patch-guard] 1/1 patch(es) ok, 0 failed`).
+- Each patch prints its own status: `[001-force-full-context] already applied (3/3 markers)` or `[001-force-full-context] applied (3/3 markers, backup: ...)`.
+
+**Adding a new patch:** drop `NNN-something.sh` into `openclaw-config/patches/` (copy the shape of `001-force-full-context.sh`), commit, push, run `~/scripts/refresh-openclaw.sh` on each Claw. No script or systemd change needed.
+
+**Retiring a patch:** delete its file from `openclaw-config/patches/` in the repo. Next `refresh-openclaw.sh` run will remove it from `~/.openclaw/patches/` on each Claw. The underlying source file will be re-vanilla-fied on the next `npm update -g openclaw`, or you can manually copy back from the `.bak-*` next to the target file.
 
 ## 9) Cost estimate
 

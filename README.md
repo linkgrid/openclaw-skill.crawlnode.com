@@ -67,8 +67,11 @@ openclaw-skills/
 │
 └── openclaw-config/
     ├── multi-agent-overlay.json5          config merged into openclaw.json
+    ├── patches/                           gateway source patches (see below)
+    │   └── 001-force-full-context.sh      force lightContext=false on subagent spawns
     └── scripts/
         ├── refresh-openclaw.sh            the one-command deploy
+        ├── patch-guard.sh                 doormat: re-applies every patch at gateway start
         └── upload-latest-screenshot.sh    helper called by browser-agent via exec
 ```
 
@@ -88,9 +91,10 @@ That script:
 2. Copies each skill folder into `~/.openclaw/skills/` and updates `SKILLS.json`.
 3. Copies each `agents/<name>/AGENTS.md` into the path listed in its sibling `WORKSPACE` file (backing up the previous version).
 4. Installs helper scripts from `openclaw-config/scripts/` (except itself) into `~/.openclaw/scripts/`.
-5. Applies `openclaw-config/multi-agent-overlay.json5` via `openclaw config patch --file` (dry-run validated first).
-6. Self-updates: replaces `~/scripts/refresh-openclaw.sh` with the freshest version from the repo so future runs pick up any changes.
-7. Restarts the OpenClaw gateway.
+5. Installs each `openclaw-config/patches/*.sh` into `~/.openclaw/patches/`, wires `patch-guard.sh` into systemd as an `ExecStartPre` on `openclaw-gateway.service`, and runs the guard once immediately.
+6. Applies `openclaw-config/multi-agent-overlay.json5` via `openclaw config patch --file` (dry-run validated first).
+7. Self-updates: replaces `~/scripts/refresh-openclaw.sh` with the freshest version from the repo so future runs pick up any changes.
+8. Restarts the OpenClaw gateway.
 
 Idempotent. Safe to re-run. Exits non-zero on the first failure. Full log of the config patch step at `/tmp/openclaw-refresh-overlay.log`.
 
@@ -123,6 +127,37 @@ Anything that touches a Claw's behaviour is a change to this repo:
 2. Add a row for it in `SKILLS.json` with `capabilities`, `requires_env`, and `collaborates_with`.
 3. Add the skill's name to the specialist's `skills: [...]` array in `openclaw-config/multi-agent-overlay.json5`.
 4. Push and run the refresh script.
+
+## Gateway patches (read this before touching OpenClaw source)
+
+**Claw1 and Claw2 both run patched OpenClaw source code.** If you're an AI or a human debugging strange gateway behaviour, DO NOT restore the vanilla OpenClaw files — they contain bugs that these patches fix. Instead, look at what patches are active first.
+
+Patches live in `openclaw-config/patches/` in this repo. Each patch is a small, idempotent bash script that edits a file inside the installed OpenClaw npm package (`~/.npm-global/lib/node_modules/openclaw/...`).
+
+Because those installed files can be overwritten by `npm update -g openclaw`, `refresh-openclaw.sh` also installs a **doormat** (`patch-guard.sh`) as a systemd `ExecStartPre` hook on `openclaw-gateway.service`. Every gateway start — whether from reboot, manual restart, or post-upgrade — re-checks each patch and re-applies it if needed, BEFORE the gateway boots. No manual step is ever required after an OpenClaw upgrade.
+
+**Current patches:**
+
+| File | What it fixes |
+|---|---|
+| `patches/001-force-full-context.sh` | Forces `lightContext=false` for every subagent spawn. Vanilla OpenClaw lets the classifier LLM decide, which flips run-to-run and randomly strips the specialist's `AGENTS.md`, causing the browser-agent to loop on `browser: screenshot`. |
+
+**How to check what's live on a Claw:**
+
+```bash
+ls ~/.openclaw/patches/                # what's installed
+journalctl --user -u openclaw-gateway | grep patch-guard   # last run's log line
+```
+
+**How to add a new patch:**
+
+1. Create `openclaw-config/patches/NNN-short-name.sh` in this repo. Copy the shape of `001-force-full-context.sh` — must be idempotent, must print a clear "already applied" or "applied" line, and must exit non-zero on failure.
+2. Commit and push.
+3. Run `~/scripts/refresh-openclaw.sh` on each Claw.
+
+**How to retire a patch:** delete its file from `openclaw-config/patches/` in the repo, commit, push, and run the refresh script. The refresh script also removes files from `~/.openclaw/patches/` that are no longer in the repo. The underlying source file will be re-vanilla-fied on the next `npm update -g openclaw` (or you can revert manually from the `.bak-preforcefullcontext-*` backups the patch script leaves).
+
+**How to revert a patch manually (rollback):** each patch script keeps a `.bak-preforcefullcontext-<timestamp>` backup of the file it modified next to the target. Copy that backup over the patched file and restart the gateway.
 
 ## Adding a new specialist agent
 
