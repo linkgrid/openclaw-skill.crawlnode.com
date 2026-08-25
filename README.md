@@ -2,9 +2,7 @@
 
 Central repository for OpenClaw agent skills, per-agent prompts (`AGENTS.md`), config overlay, and the one-command deploy script for each Claw machine.
 
-**Deployment status (Aug 24 2026):** live on Claw2. Claw1 pending (machine offline in the office).
-
-> See [DESIGN.md](DESIGN.md) for the full architecture, quirks we hit, and the current list of open bugs. That doc is the single source of truth if you're new to this repo.
+> See [DESIGN.md](DESIGN.md) for the full architecture — classifier + specialists, OpenClaw behavior notes, gateway patches, and folder layout.
 
 ## Architecture at a glance
 
@@ -110,7 +108,7 @@ mkdir -p ~/scripts && curl -sSL \
 ~/scripts/refresh-openclaw.sh
 ```
 
-Both Claws should end up on the same commit — the refresh script pulls `main`.
+Each Claw machine should end up on the same commit — the refresh script pulls `main`.
 
 ## Change workflow
 
@@ -119,7 +117,7 @@ Anything that touches a Claw's behaviour is a change to this repo:
 1. Edit the relevant file (a `SKILL.md`, an `AGENTS.md`, `SKILLS.json`, the overlay, a helper script).
 2. Commit and push to `main`.
 3. SSH into each Claw and run `~/scripts/refresh-openclaw.sh`.
-4. Test the changed path (Slack for user-facing flows; CLI for internal ones).
+4. Test the changed path through Slack (or your normal user-facing channel).
 
 ## Adding a new skill
 
@@ -130,7 +128,7 @@ Anything that touches a Claw's behaviour is a change to this repo:
 
 ## Gateway patches (read this before touching OpenClaw source)
 
-**Claw1 and Claw2 both run patched OpenClaw source code.** If you're an AI or a human debugging strange gateway behaviour, DO NOT restore the vanilla OpenClaw files — they contain bugs that these patches fix. Instead, look at what patches are active first.
+**Claw machines run patched OpenClaw source code.** If you're debugging strange gateway behaviour, DO NOT restore the vanilla OpenClaw files — they contain bugs that these patches fix. Instead, look at what patches are active first.
 
 Patches live in `openclaw-config/patches/` in this repo. Each patch is a small, idempotent bash script that edits a file inside the installed OpenClaw npm package (`~/.npm-global/lib/node_modules/openclaw/...`).
 
@@ -140,7 +138,7 @@ Because those installed files can be overwritten by `npm update -g openclaw`, `r
 
 | File | What it fixes |
 |---|---|
-| `patches/001-force-full-context.sh` | Forces `lightContext=false` for every subagent spawn. Vanilla OpenClaw lets the classifier LLM decide, which flips run-to-run and randomly strips the specialist's `AGENTS.md`, causing the browser-agent to loop on `browser: screenshot`. |
+| `patches/001-force-full-context.sh` | Forces `lightContext=false` for every subagent spawn. Vanilla OpenClaw lets the classifier LLM decide, which flips run-to-run and randomly strips the specialist's `AGENTS.md`, causing the browser-agent to loop on `browser: screenshot`. Locates its target file by content (not filename) so it survives OpenClaw upgrades. |
 
 **How to check what's live on a Claw:**
 
@@ -170,8 +168,4 @@ journalctl --user -u openclaw-gateway | grep patch-guard   # last run's log line
 
 | Repo | Purpose |
 |------|---------|
-| [asa-cf-worker.autoscale.team](https://github.com/linkgrid/asa-cf-worker.autoscale.team) | Cloudflare Worker that connects Slack to the OpenClaw gateways. |
-
-## Known issues
-
-See [DESIGN.md §11](DESIGN.md) for the current list, including the open Slack-path bug (`_No response._` after `sessions_yield`) that CLI tests do not reproduce.
+| [asa-cf-worker.autoscale.team](https://github.com/linkgrid/asa-cf-worker.autoscale.team) | Cloudflare Worker that connects Slack to the OpenClaw gateways. Day-to-day machine access and deploy status: `docs/OPENCLAW_WORKING_CONTEXT.md` in that repo. |

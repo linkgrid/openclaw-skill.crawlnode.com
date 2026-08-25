@@ -1,12 +1,8 @@
 # OpenClaw Multi-Agent Design
 
-**Status:** LIVE on Claw2. Claw1 pending (machine offline in office at time of writing).
-**Last updated:** August 24, 2026.
-**Applies to:** OpenClaw gateways running on Claw1 and Claw2, driven by the [Asa Cloudflare Worker](https://github.com/linkgrid/asa-cf-worker.autoscale.team) from Slack.
+**Applies to:** OpenClaw gateways on Claw machines, driven by the [Asa Cloudflare Worker](https://github.com/linkgrid/asa-cf-worker.autoscale.team) from Slack.
 
-Written in plain language for non-developers. Every technical term is explained in the glossary below.
-
-> **Known open bug (Aug 24 2026):** Slack requests still fail with `_No response._` even after two Asa-side patches (protocol version negotiation and per-yield terminal suppression). CLI runs on Claw2 succeed end-to-end. The Cloudflare Worker's `chat()` generator terminates after the parent's `sessions_yield` in ways we haven't fully diagnosed. **See section 11 "Known issues" and the handoff notes at the bottom of this doc.**
+Written in plain language for non-developers. Every technical term is explained in the glossary below. This doc explains **how the system works** — architecture, components, and stable OpenClaw behavior notes. For which machines are live, SSH access, and deploy commands, see `docs/OPENCLAW_WORKING_CONTEXT.md` in the Asa repo.
 
 ---
 
@@ -41,7 +37,7 @@ Previously a single OpenClaw agent per Claw did everything: read the user's Slac
 
 Root cause: **one brain had to remember all the rules for all the skills at once**, and it dropped some.
 
-## 2) Target architecture (live on Claw2 today)
+## 2) Target architecture
 
 ```mermaid
 flowchart TB
@@ -84,26 +80,24 @@ sequenceDiagram
     participant B as browser-agent
     participant P as Passimage
 
-    U->>A: Claw2: screenshot example.com
+    U->>A: screenshot example.com
     A->>C: chat.send via WebSocket
     C->>C: read SKILLS.json
     C->>B: sessions_spawn "screenshot example.com"
     C->>C: sessions_yield
-    Note over A,C: [BUG] Asa closes the stream here today
+    Note over A,C: Asa keeps WebSocket open until specialist finishes
     B->>B: browser: navigate + screenshot (ONCE)
     B->>B: exec ~/.openclaw/scripts/upload-latest-screenshot.sh
-    B->>P: curl upload
+    B->>P: curl upload (via helper script)
     P-->>B: public URL
     B-->>C: announce with URL
     C->>A: final text with URL
     A->>U: reply in Slack
 ```
 
-Steps 1–5 and 7–12 work when run from the OpenClaw CLI directly on Claw2. Steps 6–12 do NOT complete via the Slack/Asa path today.
+## 5) OpenClaw behavior notes (important for this deployment)
 
-## 5) OpenClaw config quirks we hit (write these down)
-
-These are **not** in OpenClaw's public docs. All discovered by trial + gateway-log spelunking on Aug 24 2026 against OpenClaw `2026.6.34`.
+These are **not** in OpenClaw's public docs. Discovered by trial + gateway-log spelunking against OpenClaw `2026.6.34`.
 
 ### 5.1 Schema is `agents.list[]`, not `agents.entries.{}`
 
@@ -129,7 +123,7 @@ Since `2026.6.x`, `browser: screenshot` saves the PNG to `~/.openclaw/media/brow
 
 ## 6) The helper-script pattern (`upload-latest-screenshot.sh`)
 
-To sidestep quirk 5.4 without depending on which LLM the specialist is running as, every non-trivial "produce a file → upload it" step is packaged as a shell script the agent calls via `exec`. The script:
+To sidestep quirk 5.4 without depending on which LLM the specialist is running as, the browser screenshot upload is packaged as a shell script the agent calls via `exec`. The script:
 
 - Finds the newest PNG in `~/.openclaw/media/browser/`.
 - Reads `PASSIMAGE_FILES_API_KEY` from the gateway's env (loaded from `~/.openclaw/.env` by systemd).
@@ -151,7 +145,7 @@ openclaw-skills/                           (this repo)
 │   ├── docs/CRAWLNODE-API-DOCUMENTATION.md
 │   └── scripts/test-crawlnode.sh
 ├── passimagein/SKILL.md                   unchanged (loaded into every specialist)
-├── agents/                                per-agent prompts (new Aug 24 2026)
+├── agents/                                per-agent prompts
 │   ├── main/
 │   │   ├── AGENTS.md                      classifier prompt
 │   │   └── WORKSPACE                      "$HOME/.openclaw/workspace"
@@ -161,7 +155,7 @@ openclaw-skills/                           (this repo)
 │   └── crawlnode-agent/
 │       ├── AGENTS.md                      crawlnode specialist prompt
 │       └── WORKSPACE                      "$HOME/.openclaw/workspace-crawlnode"
-└── openclaw-config/                       config + deploy (new Aug 24 2026)
+└── openclaw-config/                       config + deploy
     ├── multi-agent-overlay.json5          config chunk applied via `openclaw config patch`
     └── scripts/
         ├── refresh-openclaw.sh            the one-command deploy
@@ -183,7 +177,7 @@ Run on each Claw as: `~/scripts/refresh-openclaw.sh`. Steps in order:
 
 Idempotent, safe to re-run. Exits non-zero on the first failure.
 
-**Practical note discovered Aug 24:** when invoked through certain non-interactive SSH wrappers (like a plain `ssh user@host '~/scripts/refresh-openclaw.sh'`), the openclaw CLI subprocess sometimes gets SIGKILL'd mid-run. Run it in an interactive SSH session (`ssh -t`) or detached (`nohup ... < /dev/null &`) to avoid this. Direct invocation on the machine itself works fine.
+**Practical note:** when invoked through certain non-interactive SSH wrappers (like a plain `ssh user@host '~/scripts/refresh-openclaw.sh'`), the openclaw CLI subprocess sometimes gets SIGKILL'd mid-run. Run it in an interactive SSH session (`ssh -t`) or detached (`nohup ... < /dev/null &`) to avoid this. Direct invocation on the machine itself works fine.
 
 ### 8.1) Gateway patches (survive `npm update -g openclaw`)
 
@@ -195,11 +189,11 @@ We solve this with a **patches folder + doormat** pattern:
 - **`openclaw-config/scripts/patch-guard.sh`** — the doormat. Walks `~/.openclaw/patches/*.sh` and executes each one. Idempotency lives inside each patch script.
 - **systemd drop-in** at `~/.config/systemd/user/openclaw-gateway.service.d/patch-guard.conf` adds `ExecStartPre=~/.openclaw/scripts/patch-guard.sh` to the gateway unit. Result: every gateway start — reboot, manual restart, or post-`npm update` — first runs the doormat, which re-applies any patches that got clobbered. No operator action required after an OpenClaw upgrade.
 
-**Current patches (Aug 24 2026):**
+**Current patches:**
 
 | Patch | What it fixes |
 |---|---|
-| `001-force-full-context.sh` | Hard-codes 3 places in `openclaw-tools-*.js` so `params.lightContext` is treated as `false` regardless of what the classifier sent. Vanilla OpenClaw lets the LLM classifier decide `lightContext` per spawn, which flips run-to-run and randomly ships subagents without their AGENTS.md rulebook — the root cause of the browser-agent screenshot loop / timeout observed on Aug 24. |
+| `001-force-full-context.sh` | Forces `params.lightContext` to behave as `false` in three code paths inside the bundled tools module. Vanilla OpenClaw lets the LLM classifier decide `lightContext` per spawn, which flips run-to-run and randomly ships subagents without their AGENTS.md rulebook — the root cause of the browser-agent screenshot loop. The script locates its target file by content (not filename) and exits non-zero if it cannot find it, so a failed patch after an OpenClaw upgrade is loud rather than silent. |
 
 **Diagnostics:**
 
@@ -221,40 +215,15 @@ We solve this with a **patches folder + doormat** pattern:
 
 ## 10) Non-goals
 
-- **No changes to Asa's runtime code required by design.** In practice we made two small Asa-side patches to handle OpenClaw 2026.6.34's newer wire protocol and its `sessions_yield` behaviour — see section 11 and the Asa repo's commit history.
 - **No use of OpenClaw channel bindings for content-based routing.** The classifier prompt does that instead.
 - **No nested sub-agents (`maxSpawnDepth: 1`).** Specialists cannot spawn further.
 - **No separate `passimagein-agent`.** Passimage is loaded into every specialist as a shared skill.
 
-## 11) Known issues (Aug 24 2026)
-
-### 11.1 Slack path still returns `_No response._`
-
-CLI tests on Claw2 work end-to-end (`~/.npm-global/bin/openclaw agent --agent main -m 'take a screenshot of https://example.com'` returns a valid Passimage URL). Slack tests do NOT — the Asa worker terminates the run after `sessions_yield` and before `browser-agent` produces any output.
-
-**Fixes shipped in the Asa Cloudflare Worker so far (commits on `main`):**
-
-- `1e095fa fix(openclaw): accept gateway protocol v3 OR v4 during connect` — needed after Claw2 upgraded from 2026.4.2 to 2026.6.34.
-- `fcb4831 fix(openclaw): keep listening after sessions_yield in multi-agent runs` — first attempt at suppression, only caught `stopReason=lifecycle_end`.
-- `99b8e2f fix(openclaw): suppress every premature terminal after sessions_yield` — counter-based suppression for `end_turn` / `stop` / `length` / `content_filter` / `lifecycle_end` / `chat_aborted`.
-
-**Symptom after those fixes deployed:** Slack still shows main's tool calls (`read` → `sessions_spawn` → `sessions_yield`) then a blank line, `View full thread`, then `_No response._`. The subagent apparently never starts (nothing in `~/.openclaw/agents/browser-agent/sessions/` newer than the last CLI test).
-
-**Suspected areas to investigate next:**
-
-- The `sessions_spawn` from Slack passes `"model": "openrouter/openai/gpt-5.6-luna"` explicitly. The CLI-successful runs passed `openrouter/openai/gpt-5.4`. Model routing may be silently rejecting the spawn.
-- The overlay's `main.subagents.model` may not be enforced when the classifier passes an explicit `model` in `sessions_spawn` args.
-- Asa may still be counting suppressions incorrectly. The new counter increments on `sessions_yield` only, not `sessions_spawn`. If the gateway emits a `chat_final` between the `sessions_spawn` tool_call_end and the `sessions_yield` tool_call_start, the counter wouldn't catch it.
-- Cloudflare Worker CPU/subrequest budgets may be closing the WebSocket. Check the Worker's real-time logs during the failing request.
-
-### 11.2 Two orthogonal quirks documented above (5.2, 5.3, 5.4)
-
-Section 5 describes them. Any future skill/agent work should read that section first.
-
-## 12) Related documents
+## 11) Related documents
 
 - [asa-cf-worker.autoscale.team](https://github.com/linkgrid/asa-cf-worker.autoscale.team) — the Slack-facing side.
-- `docs/OPENCLAW_WORKING_CONTEXT.md` in the Asa repo — day-to-day OpenClaw operations reference.
+- `docs/OPENCLAW_WORKING_CONTEXT.md` in the Asa repo — SSH, machine access, deploy commands, operational checklists.
+- `docs/OPENCLAW_DESIGN.md` in the Asa repo — copy of this file for convenience.
 - OpenClaw upstream docs (used to inform this design, but see section 5 for where they disagree with reality):
   - `https://docs.openclaw.ai/concepts/multi-agent`
   - `https://docs.openclaw.ai/tools/subagents`
