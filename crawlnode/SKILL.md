@@ -183,6 +183,23 @@ curl -sS -X POST "http://api1.crawlnode.com:8001/api/drag" \
 
 **POST /api/screenshot** — response body is **PNG binary** (`image/png`). Save to a file; do not paste raw bytes into chat.
 
+> **MANDATORY: call `/api/maximize` before your first screenshot.**
+> `/api/screenshot` captures the **OS window**, not the page. A fresh session's
+> window is collapsed to roughly **97×6 pixels**, so a screenshot taken before
+> maximizing returns a valid-but-useless **211-byte** PNG. It is not an error —
+> the upload succeeds and you get a Passimage URL showing nothing.
+>
+> Verified on the live fleet Aug 24 2026, same session, same page:
+>
+> | Order | Result |
+> |---|---|
+> | `go` → `screenshot` | `97×6`, 211 bytes — blank |
+> | `go` → `maximize` → `screenshot` | `988×732`, 30,448 bytes — correct |
+>
+> Maximize **after** `/api/go`, not before: navigating can collapse the window
+> again. If a screenshot comes back under ~5 KB, treat it as blank, call
+> `/api/maximize`, and retake it once.
+
 > **Mandatory rule — screenshot → upload → share.**
 > Every time you take a screenshot you **must** upload it and share the
 > public URL with the user. There are no exceptions. See the combined
@@ -311,7 +328,7 @@ These rules help you complete tasks efficiently and avoid common failure modes.
 
 ### Efficiency
 
-- Resize the browser window to a standard desktop size (e.g. `1440×1200`) early in the session with `/api/resize`. This ensures consistent element layout and avoids mobile or responsive views that may hide elements.
+- Call `/api/maximize` after navigating and before screenshotting — see the mandatory window rule under **Screen capture**. Node screens are 1024×768, so `/api/resize` requests larger than that are silently clamped (asking for `1440×1200` yields roughly `1044×788`). Prefer `/api/maximize` over hand-picked dimensions.
 - Allow 3–5 seconds after `/api/go` or any action that triggers page navigation before taking a screenshot or calling `/api/view`. Pages with JavaScript may need time to render.
 - When the task involves multiple pages, complete all actions on one page before navigating to the next. Do not jump back and forth between pages unnecessarily.
 

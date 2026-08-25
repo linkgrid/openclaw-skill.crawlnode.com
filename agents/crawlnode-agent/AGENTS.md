@@ -64,19 +64,34 @@ SID=$(curl -sS -X POST "$API/api/start" -H "Token: $CRAWLNODE_TOKEN" \
   | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 [ -z "$SID" ] && { echo "ERROR: no session_id"; exit 1; }
 
-curl -sS -X POST "$API/api/resize" -H "Token: $CRAWLNODE_TOKEN" \
-  -H "X-Session-Id: $SID" -H "Content-Type: application/json" \
-  -d '{"width":1440,"height":1200}' >/dev/null
-
 curl -sS -X POST "$API/api/go" -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: $SID" -H "Content-Type: application/json" \
   -d '{"url":"<THE URL>"}'
 
-sleep 4   # let JavaScript render before capturing
+sleep 6   # /api/go returns before the page paints; let JavaScript render
+
+# MANDATORY. A fresh session's window is collapsed to ~97x6 px, and
+# /api/screenshot captures the WINDOW, not the page. Skip this and you get a
+# valid 211-byte PNG of nothing. Must come AFTER /api/go.
+curl -sS -X POST "$API/api/maximize" -H "Token: $CRAWLNODE_TOKEN" \
+  -H "X-Session-Id: $SID" -H "Content-Type: application/json" -d '{}'
+sleep 2
 
 curl -sS -X POST "$API/api/screenshot" -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: $SID" -H "Content-Type: application/json" \
   -d '{}' --output /tmp/crawlnode-shot.png
+
+# Sanity-check the capture before uploading a blank image.
+BYTES=$(wc -c < /tmp/crawlnode-shot.png)
+if [ "$BYTES" -lt 5000 ]; then
+  echo "WARNING: screenshot is only $BYTES bytes (blank window) — retaking"
+  curl -sS -X POST "$API/api/maximize" -H "Token: $CRAWLNODE_TOKEN" \
+    -H "X-Session-Id: $SID" -H "Content-Type: application/json" -d '{}'
+  sleep 3
+  curl -sS -X POST "$API/api/screenshot" -H "Token: $CRAWLNODE_TOKEN" \
+    -H "X-Session-Id: $SID" -H "Content-Type: application/json" \
+    -d '{}' --output /tmp/crawlnode-shot.png
+fi
 
 curl -sS -X POST "https://s.passimage.in/upload" \
   -H "X-API-Key: $PASSIMAGE_FILES_API_KEY" -H "Content-Type: image/png" \

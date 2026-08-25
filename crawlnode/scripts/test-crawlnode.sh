@@ -63,9 +63,21 @@ echo "  $GO_RESP"
 # /api/go returns as soon as navigation is dispatched, not when the page has
 # rendered — a screenshot taken immediately after comes back as a ~200-byte
 # blank PNG and the title reads "New tab". Give Chrome time to paint.
-RENDER_WAIT="${CRAWLNODE_RENDER_WAIT:-5}"
+RENDER_WAIT="${CRAWLNODE_RENDER_WAIT:-6}"
 echo "Waiting ${RENDER_WAIT}s for the page to render ..."
 sleep "$RENDER_WAIT"
+
+# MANDATORY before any screenshot. /api/screenshot captures the OS window, and
+# a fresh session's window is collapsed to ~97x6 px — without this you get a
+# valid-looking 211-byte PNG of nothing. Must run AFTER /api/go.
+echo "Calling $API/api/maximize (required for a usable screenshot) ..."
+curl -sS -X POST "$API/api/maximize" \
+  -H "Token: $CRAWLNODE_TOKEN" \
+  -H "X-Session-Id: $SESSION_ID" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+echo
+sleep 2
 
 # --- 3. Get element tree ---
 echo "Calling $API/api/view (saved to: /tmp/crawlnode-view1.txt)"
