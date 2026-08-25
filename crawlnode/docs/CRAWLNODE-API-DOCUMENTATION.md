@@ -66,7 +66,7 @@ CrawlNode is a distributed browser automation system that provides a unified HTT
 
 ### Request Flow
 
-1. **Client Request**: User sends HTTP request to DispatcherServer (`api1.crawlnode.com:8000`)
+1. **Client Request**: User sends HTTP request to DispatcherServer (`api1.crawlnode.com:8001`)
 2. **Authentication**: DispatcherServer validates the `Token` header
 3. **Session Routing**: For existing sessions, routes to the appropriate node via `X-Session-Id`
 4. **Node Selection**: For new sessions (`/api/start`), selects best available node based on load
@@ -106,10 +106,10 @@ Token: your-api-token-here
 ### Base URL
 
 ```
-http://api1.crawlnode.com
+http://api1.crawlnode.com:8001
 ```
 
-**Note**: The default port is 8000. If accessing directly without a reverse proxy, use `http://api1.crawlnode.com:8000`
+**Note**: The port is mandatory and is **8001** (TCP 8011) for the current fleet. Port 80 and the legacy 8000/8010 dispatcher are a separate instance with no nodes attached — they answer with `503 No client available`. Verified Aug 24 2026: `:8001` reaches auth, bare domain and `:8000` do not.
 
 ### Session Management
 
@@ -517,7 +517,7 @@ Capture a screenshot of the browser window.
 
 **Example usage with curl:**
 ```bash
-curl -X POST "http://api1.crawlnode.com/api/screenshot" \
+curl -X POST "http://api1.crawlnode.com:8001/api/screenshot" \
   -H "Token: your-token-here" \
   -H "X-Session-Id: your-session-id" \
   -H "Content-Type: application/json" \
@@ -691,7 +691,7 @@ Dispatcher Server: Invalid token
 
 ```bash
 # 1. Create session
-curl -X POST "http://api1.crawlnode.com/api/start" \
+curl -X POST "http://api1.crawlnode.com:8001/api/start" \
   -H "Token: your-token-here" \
   -H "Content-Type: application/json" \
   -d '{"extension": true}'
@@ -699,14 +699,14 @@ curl -X POST "http://api1.crawlnode.com/api/start" \
 # Response: {"session_id": "abc123"}
 
 # 2. Navigate to page
-curl -X POST "http://api1.crawlnode.com/api/go" \
+curl -X POST "http://api1.crawlnode.com:8001/api/go" \
   -H "Token: your-token-here" \
   -H "X-Session-Id: abc123" \
   -H "Content-Type: application/json" \
   -d '{"url": "https://www.example.com"}'
 
 # 3. Take screenshot
-curl -X POST "http://api1.crawlnode.com/api/screenshot" \
+curl -X POST "http://api1.crawlnode.com:8001/api/screenshot" \
   -H "Token: your-token-here" \
   -H "X-Session-Id: abc123" \
   -H "Content-Type: application/json" \
@@ -714,7 +714,7 @@ curl -X POST "http://api1.crawlnode.com/api/screenshot" \
   --output screenshot.png
 
 # 4. Clean up
-curl -X POST "http://api1.crawlnode.com/api/destroy" \
+curl -X POST "http://api1.crawlnode.com:8001/api/destroy" \
   -H "Token: your-token-here" \
   -H "X-Session-Id: abc123" \
   -H "Content-Type: application/json" \
@@ -725,35 +725,35 @@ curl -X POST "http://api1.crawlnode.com/api/destroy" \
 
 ```bash
 # Get page elements
-curl -X POST "http://api1.crawlnode.com/api/view" \
+curl -X POST "http://api1.crawlnode.com:8001/api/view" \
   -H "Token: your-token-here" \
   -H "X-Session-Id: abc123" \
   -H "Content-Type: application/json" \
   -d '{}'
 
 # Click on username field (using element_id from view response)
-curl -X POST "http://api1.crawlnode.com/api/click" \
+curl -X POST "http://api1.crawlnode.com:8001/api/click" \
   -H "Token: your-token-here" \
   -H "X-Session-Id: abc123" \
   -H "Content-Type: application/json" \
   -d '{"element_id": "100_50_300_80"}'
 
 # Type username
-curl -X POST "http://api1.crawlnode.com/api/input" \
+curl -X POST "http://api1.crawlnode.com:8001/api/input" \
   -H "Token: your-token-here" \
   -H "X-Session-Id: abc123" \
   -H "Content-Type: application/json" \
   -d '{"element_id": "100_50_300_80", "keys": "myusername"}'
 
 # Tab to password field and type password
-curl -X POST "http://api1.crawlnode.com/api/input" \
+curl -X POST "http://api1.crawlnode.com:8001/api/input" \
   -H "Token: your-token-here" \
   -H "X-Session-Id: abc123" \
   -H "Content-Type: application/json" \
   -d '{"keys": "{tab}mypassword"}'
 
 # Submit form
-curl -X POST "http://api1.crawlnode.com/api/click" \
+curl -X POST "http://api1.crawlnode.com:8001/api/click" \
   -H "Token: your-token-here" \
   -H "X-Session-Id: abc123" \
   -H "Content-Type: application/json" \
@@ -764,7 +764,7 @@ curl -X POST "http://api1.crawlnode.com/api/click" \
 
 ```bash
 # Start session with network capture
-curl -X POST "http://api1.crawlnode.com/api/start" \
+curl -X POST "http://api1.crawlnode.com:8001/api/start" \
   -H "Token: your-token-here" \
   -H "Content-Type: application/json" \
   -d '{"extension": true}'
@@ -772,14 +772,14 @@ curl -X POST "http://api1.crawlnode.com/api/start" \
 # Navigate and perform actions...
 
 # Get network requests
-curl -X POST "http://api1.crawlnode.com/api/network" \
+curl -X POST "http://api1.crawlnode.com:8001/api/network" \
   -H "Token: your-token-here" \
   -H "X-Session-Id: abc123" \
   -H "Content-Type: application/json" \
   -d '{}'
 
 # Download specific request/response
-curl -X POST "http://api1.crawlnode.com/api/download" \
+curl -X POST "http://api1.crawlnode.com:8001/api/download" \
   -H "Token: your-token-here" \
   -H "X-Session-Id: abc123" \
   -H "Content-Type: application/json" \
@@ -924,7 +924,7 @@ class CrawlNodeClient:
 
 # Usage example
 if __name__ == "__main__":
-    client = CrawlNodeClient("http://api1.crawlnode.com", "your-token-here")
+    client = CrawlNodeClient("http://api1.crawlnode.com:8001", "your-token-here")
     
     try:
         # Start session with network capture

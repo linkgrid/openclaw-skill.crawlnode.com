@@ -62,6 +62,10 @@ for skill_dir in "$CLONE_DIR"/*/; do
   [ -f "$skill_dir/SKILL.md" ] || continue
   mkdir -p "$SKILLS_DIR/$skill_name"
   cp -r "$skill_dir"/* "$SKILLS_DIR/$skill_name/"
+  # git does not always preserve the exec bit through the clone+cp path, and a
+  # skill's helper scripts are useless without it (agents get "Permission
+  # denied"). Restore it for every .sh the skill ships.
+  find "$SKILLS_DIR/$skill_name" -type f -name '*.sh' -exec chmod +x {} +
   echo "  -> Updated skill: $skill_name"
 done
 if [ -f "$CLONE_DIR/SKILLS.json" ]; then

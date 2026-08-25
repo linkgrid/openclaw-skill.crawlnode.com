@@ -29,7 +29,7 @@ Example of correct exec usage:
 
 ```json
 {
-  "command": "curl -sS -X POST http://api1.crawlnode.com/api/start ...",
+  "command": "curl -sS -X POST http://api1.crawlnode.com:8001/api/start ...",
   "host": "gateway"
 }
 ```
@@ -51,7 +51,7 @@ Do **not** use this skill for simple static HTTP GET/POST where no browser is re
 
 | Item | Value |
 |------|--------|
-| Base URL | `http://api1.crawlnode.com` (if requests fail, try `:8000` per CrawlNode docs) |
+| Base URL | `http://api1.crawlnode.com:8001` — the port is **mandatory**. Port 80 and 8001 are different dispatcher instances; only `:8001` has live nodes. Omitting the port returns `503 No client available`. Always use the domain, never the raw IP. |
 | Auth | Header `Token: <value from env CRAWLNODE_TOKEN>` on every request |
 | Session | After `/api/start`, send header `X-Session-Id: <session_id>` on all other endpoints |
 | JSON POSTs | `Content-Type: application/json` |
@@ -77,7 +77,7 @@ Replace `SESSION_ID` with the active session. Use environment expansion for the 
 **POST /api/start** — create or reuse session.
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com/api/start" \
+curl -sS -X POST "http://api1.crawlnode.com:8001/api/start" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"proxy":"auto","extension":false}'
@@ -92,7 +92,7 @@ Body fields (all optional unless noted):
 **POST /api/destroy** — end session (requires `X-Session-Id`).
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com/api/destroy" \
+curl -sS -X POST "http://api1.crawlnode.com:8001/api/destroy" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
@@ -102,7 +102,7 @@ curl -sS -X POST "http://api1.crawlnode.com/api/destroy" \
 **POST /api/clear** — clear cookies/cache for the session.
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com/api/clear" \
+curl -sS -X POST "http://api1.crawlnode.com:8001/api/clear" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
@@ -114,7 +114,7 @@ curl -sS -X POST "http://api1.crawlnode.com/api/clear" \
 **POST /api/go**
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com/api/go" \
+curl -sS -X POST "http://api1.crawlnode.com:8001/api/go" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
@@ -132,7 +132,7 @@ curl -sS -X POST "http://api1.crawlnode.com/api/go" \
 **POST /api/resize**
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com/api/resize" \
+curl -sS -X POST "http://api1.crawlnode.com:8001/api/resize" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
@@ -150,7 +150,7 @@ curl -sS -X POST "http://api1.crawlnode.com/api/resize" \
 **POST /api/click** — one of `element_id` or `automation_id`:
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com/api/click" \
+curl -sS -X POST "http://api1.crawlnode.com:8001/api/click" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
@@ -160,7 +160,7 @@ curl -sS -X POST "http://api1.crawlnode.com/api/click" \
 **POST /api/input** — `keys` required; target via `element_id` or `automation_id`:
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com/api/input" \
+curl -sS -X POST "http://api1.crawlnode.com:8001/api/input" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
@@ -172,7 +172,7 @@ Special key tokens in `keys` include `{tab}`, `{enter}`, `{ctrl}`, `{alt}`, `{sh
 **POST /api/drag** — path of `[x,y]` points and `interval` ms between points:
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com/api/drag" \
+curl -sS -X POST "http://api1.crawlnode.com:8001/api/drag" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
@@ -205,7 +205,7 @@ When in doubt, screenshot. The cost of an extra screenshot is low; the cost of t
 
 ```bash
 # 1. Capture
-curl -sS -X POST "http://api1.crawlnode.com/api/screenshot" \
+curl -sS -X POST "http://api1.crawlnode.com:8001/api/screenshot" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
@@ -248,7 +248,7 @@ Requires starting the session with `"extension": true`.
 **POST /api/download** — raw HTTP bodies as base64:
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com/api/download" \
+curl -sS -X POST "http://api1.crawlnode.com:8001/api/download" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
