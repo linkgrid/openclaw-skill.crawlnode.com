@@ -29,7 +29,7 @@ Example of correct exec usage:
 
 ```json
 {
-  "command": "curl -sS -X POST http://api1.crawlnode.com:8001/api/start ...",
+  "command": "curl -sS -X POST http://api1.crawlnode.com:8000/api/start ...",
   "host": "gateway"
 }
 ```
@@ -51,7 +51,8 @@ Do **not** use this skill for simple static HTTP GET/POST where no browser is re
 
 | Item | Value |
 |------|--------|
-| Base URL | `http://api1.crawlnode.com:8001` — the port is **mandatory**. Port 80 and 8001 are different dispatcher instances; only `:8001` has live nodes. Omitting the port returns `503 No client available`. Always use the domain, never the raw IP. |
+| Base URL | `http://api1.crawlnode.com:8000` — **production** (4 nodes). The port is **mandatory**; omitting it returns `503 No client available`. Always use the domain, never the raw IP. |
+| Dev fallback | `http://api1.crawlnode.com:8000` — dev/test pool (18 nodes). Use only when explicitly testing against dev, not for Slack production tasks. |
 | Auth | Header `Token: <value from env CRAWLNODE_TOKEN>` on every request |
 | Session | After `/api/start`, send header `X-Session-Id: <session_id>` on all other endpoints |
 | JSON POSTs | `Content-Type: application/json` |
@@ -77,7 +78,7 @@ Replace `SESSION_ID` with the active session. Use environment expansion for the 
 **POST /api/start** — create or reuse session.
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com:8001/api/start" \
+curl -sS -X POST "http://api1.crawlnode.com:8000/api/start" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"proxy":"auto","extension":false}'
@@ -92,7 +93,7 @@ Body fields (all optional unless noted):
 **POST /api/destroy** — end session (requires `X-Session-Id`).
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com:8001/api/destroy" \
+curl -sS -X POST "http://api1.crawlnode.com:8000/api/destroy" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
@@ -102,7 +103,7 @@ curl -sS -X POST "http://api1.crawlnode.com:8001/api/destroy" \
 **POST /api/clear** — clear cookies/cache for the session.
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com:8001/api/clear" \
+curl -sS -X POST "http://api1.crawlnode.com:8000/api/clear" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
@@ -114,7 +115,7 @@ curl -sS -X POST "http://api1.crawlnode.com:8001/api/clear" \
 **POST /api/go**
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com:8001/api/go" \
+curl -sS -X POST "http://api1.crawlnode.com:8000/api/go" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
@@ -132,7 +133,7 @@ curl -sS -X POST "http://api1.crawlnode.com:8001/api/go" \
 **POST /api/resize**
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com:8001/api/resize" \
+curl -sS -X POST "http://api1.crawlnode.com:8000/api/resize" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
@@ -150,7 +151,7 @@ curl -sS -X POST "http://api1.crawlnode.com:8001/api/resize" \
 **POST /api/click** — one of `element_id` or `automation_id`:
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com:8001/api/click" \
+curl -sS -X POST "http://api1.crawlnode.com:8000/api/click" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
@@ -160,7 +161,7 @@ curl -sS -X POST "http://api1.crawlnode.com:8001/api/click" \
 **POST /api/input** — `keys` required; target via `element_id` or `automation_id`:
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com:8001/api/input" \
+curl -sS -X POST "http://api1.crawlnode.com:8000/api/input" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
@@ -172,7 +173,7 @@ Special key tokens in `keys` include `{tab}`, `{enter}`, `{ctrl}`, `{alt}`, `{sh
 **POST /api/drag** — path of `[x,y]` points and `interval` ms between points:
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com:8001/api/drag" \
+curl -sS -X POST "http://api1.crawlnode.com:8000/api/drag" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
@@ -222,7 +223,7 @@ When in doubt, screenshot. The cost of an extra screenshot is low; the cost of t
 
 ```bash
 # 1. Capture
-curl -sS -X POST "http://api1.crawlnode.com:8001/api/screenshot" \
+curl -sS -X POST "http://api1.crawlnode.com:8000/api/screenshot" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
@@ -265,7 +266,7 @@ Requires starting the session with `"extension": true`.
 **POST /api/download** — raw HTTP bodies as base64:
 
 ```bash
-curl -sS -X POST "http://api1.crawlnode.com:8001/api/download" \
+curl -sS -X POST "http://api1.crawlnode.com:8000/api/download" \
   -H "Token: $CRAWLNODE_TOKEN" \
   -H "X-Session-Id: SESSION_ID" \
   -H "Content-Type: application/json" \
@@ -290,6 +291,35 @@ Repeat for each page state:
 6. Allow a short pause between steps when the page is loading or animating.
 
 After **POST /api/go**, wait for navigation to settle, then start at step 1 (screenshot → upload → share) before doing anything else.
+
+## Form fill and verification (mandatory)
+
+**Never submit a form without verifying the input field has the expected value in `/api/view`.**
+
+CrawlNode `/api/input` simulates **keystrokes**, not clipboard paste. Keystrokes work when the field is focused. The most common failure mode is calling `/api/input` without clicking the field first, then clicking Submit — the page shows an empty-form error even though the API returned success.
+
+### Required pattern for every text field
+
+1. **POST /api/view** — find the target field (`EditControl`, match by `name` or `automation_id`).
+2. **POST /api/click** on the field first (focus it).
+3. **POST /api/input** with the full text string.
+4. **POST /api/view** again — confirm the field's `value` (or visible `name`) contains the expected text.
+5. If empty or wrong → retry once: click field → `{ctrl}a{delete}` → re-input → verify again.
+6. Only then click Submit / Decode / Continue (or use `{enter}` in the input step).
+
+### VinAudit VIN decode example
+
+Use `https://www.vinaudit.com/vin-decoder` (include `www.` — bare `vinaudit.com` can fail).
+
+1. `/api/go` → sleep → `/api/maximize` → screenshot
+2. `/api/view` → find `EditControl` named "Enter VIN"
+3. `/api/click` the VIN field
+4. `/api/input` with the full VIN (e.g. `7SAXCBE63PF399273`)
+5. `/api/view` → **verify** the field value contains the VIN before continuing
+6. Click "Decode VIN" (or append `{enter}` to the input)
+7. Screenshot result page; extract make/model/trim from visible text
+
+If the page shows "No Record Found" but you never verified step 5, treat it as an input failure and retry — do not report the empty-form message as the decoded result.
 
 ## Execution strategy
 
@@ -318,6 +348,11 @@ These rules help you complete tasks efficiently and avoid common failure modes.
 - Keep each `exec` call focused on a single logical step: start a session, navigate to a page, interact with an element, or take a screenshot. Avoid writing a single monolithic script that does everything — if one step fails in a large script, the error is harder to diagnose and recover from.
 - Use a cleanup trap (`trap cleanup EXIT`) in every script that creates a session, so `/api/destroy` is always called even if the script fails partway through.
 - Store intermediate results (view trees, screenshots) in a temporary directory and clean up after.
+- **Write API responses to files** (`start.json`, `view.json`) — do not pipe `curl` output straight into inline Python one-liners. Parse JSON from files with explicit error handling.
+- **Extract `session_id` safely:** use `python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["session_id"])' start.json` or equivalent — not shell regex on raw curl output mixed with stderr.
+- **Never call `json.loads()` on CrawlNode `element_id` values.** IDs like `110_103_287_125` look numeric but are plain strings; Python parses `110` then fails with `JSONDecodeError: Extra data`. Treat `element_id` and `automation_id` as opaque strings from `/api/view`, never as JSON numbers.
+- When parsing `/api/view`, write the full response to a file and walk the `elements` tree in a small Python script — do not embed fragile inline parsing in a 200-line bash script.
+- Prefer separate exec steps (start / go / view / click / input / verify / screenshot) over one giant script. See `crawlnode/scripts/cn-session.sh` for a minimal session wrapper.
 - **Exec approvals are handled automatically.** Do not ask the user for approval, do not include `/approve` instructions in your response, and do not wait for manual approval. Simply run the `exec` command — it will be approved and executed. Wait for the tool result, then include the output (such as screenshot URLs) in your reply to the user.
 
 ### Retries and failure limits
@@ -366,6 +401,7 @@ Even if you hit an error, a 5xx, or a retry limit: still destroy the session if 
 ## Important rules
 
 - Always call **/api/view** before relying on element identifiers; the tree changes after navigation and DOM updates.
+- **Never submit a form without verifying field values in /api/view** (see Form fill and verification).
 - Prefer **automation_id** over **element_id** when practical.
 - Always **/api/destroy** when done.
 - Enable **extension: true** only when network capture is needed.

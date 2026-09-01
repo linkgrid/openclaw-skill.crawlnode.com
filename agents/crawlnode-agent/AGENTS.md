@@ -39,7 +39,7 @@ POST /api/screenshot → PNG binary
 POST /api/destroy    → ALWAYS, even after an error
 ```
 
-Base URL is `http://api1.crawlnode.com:8001` — **the `:8001` port is mandatory**. Port 80 and port 8000 are a different dispatcher with no nodes attached; they answer `503 No client available`. Use the domain, never the raw IP.
+Base URL is `http://api1.crawlnode.com:8000` — **production** (4 nodes). The `:8000` port is mandatory for Slack tasks. Dev/test pool is `:8001` (18 nodes) — use only when explicitly testing dev. Port 80 returns `503 No client available`. Use the domain, never the raw IP.
 
 Every request carries `Token: $CRAWLNODE_TOKEN`. Every request except `/api/start` also carries `X-Session-Id: <session_id>`.
 
@@ -52,7 +52,7 @@ Every request carries `Token: $CRAWLNODE_TOKEN`. Every request except `/api/star
 Write it as ONE script with a cleanup trap, so the session is always destroyed. Run it via `exec` with `host: "gateway"`:
 
 ```bash
-API="http://api1.crawlnode.com:8001"
+API="http://api1.crawlnode.com:8000"
 SID=""
 cleanup() { [ -n "$SID" ] && curl -sS -X POST "$API/api/destroy" \
   -H "Token: $CRAWLNODE_TOKEN" -H "X-Session-Id: $SID" \
@@ -123,9 +123,24 @@ Read `crawlnode/SKILL.md` for the full endpoint list (`/api/click`, `/api/input`
 
 1. `/api/view` to get the current element tree. Never reuse identifiers from a previous page state.
 2. Prefer `automation_id` over the coordinate-based `element_id` when both exist.
-3. `/api/click` or `/api/input` with that identifier.
-4. Screenshot after any visible change, upload it, keep the URL.
-5. Reply with the extracted data plus every Passimage URL, one per line.
+3. For **text fields**: `/api/click` the field first (focus), then `/api/input`, then `/api/view` again to **verify** the value before submit. Never click Submit/Decode on an unverified field.
+4. `/api/click` or `/api/input` with that identifier.
+5. Screenshot after any visible change, upload it, keep the URL.
+6. Reply with the extracted data plus every Passimage URL, one per line.
+
+### Form-fill verification (mandatory)
+
+**Never submit a form without verifying the input field has the expected value in `/api/view`.**
+
+Pattern: click field → input text → `/api/view` verify → only then submit.
+
+For VinAudit (`https://www.vinaudit.com/vin-decoder`): find "Enter VIN" `EditControl`, click it, input the full VIN, verify the field contains the VIN, then click "Decode VIN". If "No Record Found" appears but verification was skipped, retry the input — do not report empty-form errors as decoded results.
+
+### Script structure (avoid brittle one-liners)
+
+- Write curl responses to files (`start.json`, `view.json`); parse with small Python blocks — not inline `curl | python3 -c`.
+- **Never `json.loads()` on `element_id` values** like `110_103_287_125` — they are strings, not JSON numbers.
+- Keep exec steps small (start / go / view / click / input / verify / screenshot). Use `crawlnode/scripts/cn-session.sh` for session start/destroy.
 
 Network capture (`/api/network`, `/api/download`) requires starting the session with `{"extension":true}` — only do that when the user actually asked for traffic.
 
@@ -133,7 +148,7 @@ Network capture (`/api/network`, `/api/download`) requires starting the session 
 
 | HTTP | Meaning | What to do |
 |---|---|---|
-| `503 No client available` | No browser nodes online — or you used the wrong port | Verify the URL has `:8001`. If it does, report that no CrawlNode nodes are online and stop. |
+| `503 No client available` | No browser nodes online — or you used the wrong port | Verify the URL has `:8000` for production. Dev pool is `:8001`. If the port is correct, report that no CrawlNode nodes are online and stop. |
 | `520 Invalid token` | `CRAWLNODE_TOKEN` wrong/expired | Report that the CrawlNode token was rejected. Never print the token. |
 | `520 No available node` | Dispatcher has no node with capacity | Report and stop. |
 | `510` | Node connected but its Agent process is down | Report and stop. |

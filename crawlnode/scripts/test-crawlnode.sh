@@ -8,7 +8,7 @@ for cmd in curl sed grep; do
   fi
 done
 
-API="${CRAWLNODE_API_URL:-http://api1.crawlnode.com:8001}"
+API="${CRAWLNODE_API_URL:-http://api1.crawlnode.com:8000}"
 SESSION_ID=""
 
 cleanup() {
