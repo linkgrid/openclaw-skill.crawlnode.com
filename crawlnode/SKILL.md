@@ -303,7 +303,7 @@ CrawlNode `/api/input` simulates **keystrokes**, not clipboard paste. Keystrokes
 1. **POST /api/view** — find the target field (`EditControl`, match by `name` or `automation_id`).
 2. **POST /api/click** on the field first (focus it).
 3. **POST /api/input** with the full text string.
-4. **POST /api/view** again — confirm the field's `value` (or visible `name`) contains the expected text.
+4. **POST /api/view** again — confirm the field's `value` contains the expected text (for `EditControl`, check the `value` property — the VIN may not appear in `name`).
 5. If empty or wrong → retry once: click field → `{ctrl}a{delete}` → re-input → verify again.
 6. Only then click Submit / Decode / Continue (or use `{enter}` in the input step).
 
@@ -315,7 +315,7 @@ Use `https://www.vinaudit.com/vin-decoder` (include `www.` — bare `vinaudit.co
 2. `/api/view` → find `EditControl` named "Enter VIN"
 3. `/api/click` the VIN field
 4. `/api/input` with the full VIN (e.g. `7SAXCBE63PF399273`)
-5. `/api/view` → **verify** the field value contains the VIN before continuing
+5. `/api/view` → **verify** the field `value` contains the VIN (check `value` on `EditControl`, not just `name`) before continuing
 6. Click "Decode VIN" (or append `{enter}` to the input)
 7. Screenshot result page; extract make/model/trim from visible text
 
