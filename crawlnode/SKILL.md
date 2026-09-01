@@ -52,7 +52,7 @@ Do **not** use this skill for simple static HTTP GET/POST where no browser is re
 | Item | Value |
 |------|--------|
 | Base URL | `http://api1.crawlnode.com:8000` — **production** (4 nodes). The port is **mandatory**; omitting it returns `503 No client available`. Always use the domain, never the raw IP. |
-| Dev fallback | `http://api1.crawlnode.com:8000` — dev/test pool (18 nodes). Use only when explicitly testing against dev, not for Slack production tasks. |
+| Dev fallback | `http://api1.crawlnode.com:8001` — dev/test pool (18 nodes). Use only when explicitly testing against dev, not for Slack production tasks. |
 | Auth | Header `Token: <value from env CRAWLNODE_TOKEN>` on every request |
 | Session | After `/api/start`, send header `X-Session-Id: <session_id>` on all other endpoints |
 | JSON POSTs | `Content-Type: application/json` |
